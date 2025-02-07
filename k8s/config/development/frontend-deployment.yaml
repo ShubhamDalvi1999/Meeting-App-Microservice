@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: meeting-frontend
+  namespace: meeting-app
+  labels:
+    app: meeting-frontend
+    component: web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: meeting-frontend
+  template:
+    metadata:
+      labels:
+        app: meeting-frontend
+    spec:
+      initContainers:
+      - name: init-backend-check
+        image: curlimages/curl:8.4.0
+        command: ['sh', '-c', 'until curl -f ${NEXT_PUBLIC_API_URL}/health; do echo waiting for backend api; sleep 2; done;']
+        env:
+        - name: NEXT_PUBLIC_API_URL
+          valueFrom:
+            configMapKeyRef:
+              name: meeting-app-config
+              key: NEXT_PUBLIC_API_URL
+      containers:
+      - name: web-server
+        image: meeting-app-frontend:dev
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 3000
+          name: http-web
+        env:
+        - name: NODE_ENV
+          value: "development"
+        - name: NEXT_PUBLIC_API_URL
+          valueFrom:
+            configMapKeyRef:
+              name: meeting-app-config
+              key: NEXT_PUBLIC_API_URL
+        - name: NEXT_PUBLIC_WS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: meeting-app-config
+              key: NEXT_PUBLIC_WS_URL
+        - name: NEXT_PUBLIC_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: meeting-app-config
+              key: NEXT_PUBLIC_BASE_URL
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: http-web
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 2
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: http-web
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 2
+        volumeMounts:
+        - name: tmp-data
+          mountPath: /tmp
+        - name: next-cache
+          mountPath: /app/.next/cache
+      volumes:
+      - name: tmp-data
+        emptyDir: {}
+      - name: next-cache
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: meeting-frontend-internal
+  namespace: meeting-app
+  labels:
+    app: meeting-frontend
+    type: internal
+spec:
+  selector:
+    app: meeting-frontend
+  ports:
+  - name: http-web
+    port: 3000
+    targetPort: http-web
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: meeting-frontend-external
+  namespace: meeting-app
+  labels:
+    app: meeting-frontend
+    type: external
+spec:
+  type: NodePort
+  selector:
+    app: meeting-frontend
+  ports:
+  - name: http-web
+    port: 3000
+    targetPort: http-web
+    nodePort: 30000 

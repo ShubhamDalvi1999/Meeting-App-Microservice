@@ -1,0 +1,154 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: meeting-backend
+  namespace: meeting-app
+  labels:
+    app: meeting-backend
+    component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: meeting-backend
+  template:
+    metadata:
+      labels:
+        app: meeting-backend
+    spec:
+      initContainers:
+      - name: init-db-check
+        image: postgres:15-alpine
+        command: ['sh', '-c', 'until pg_isready -h postgres-db -p 5432 -U $POSTGRES_USER; do echo waiting for database; sleep 2; done;']
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: meeting-app-secrets
+              key: POSTGRES_USER
+      - name: init-redis-check
+        image: redis:7-alpine
+        command: ['sh', '-c', 'until redis-cli -h redis-cache -a "$REDIS_PASSWORD" ping; do echo waiting for redis; sleep 2; done;']
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: meeting-app-secrets
+              key: REDIS_PASSWORD
+      - name: init-db-migrate
+        image: meeting-app-backend:dev
+        workingDir: /app
+        command: ['python', '-c', 'import os; os.environ["FLASK_APP"] = "app.py"; os.environ["FLASK_NO_MIGRATE"] = "0"; from app import app; from flask_migrate import upgrade; with app.app_context(): upgrade()']
+        envFrom:
+        - configMapRef:
+            name: meeting-app-config
+        - secretRef:
+            name: meeting-app-secrets
+      containers:
+      - name: api-server
+        image: meeting-app-backend:dev
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 5000
+          name: http-api
+        envFrom:
+        - configMapRef:
+            name: meeting-app-config
+        - secretRef:
+            name: meeting-app-secrets
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http-api
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http-api
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        volumeMounts:
+        - name: tmp-data
+          mountPath: /tmp
+      - name: websocket-server
+        image: meeting-app-websocket:dev
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 3001
+          name: ws-api
+        envFrom:
+        - configMapRef:
+            name: meeting-app-config
+        - secretRef:
+            name: meeting-app-secrets
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: ws-api
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: ws-api
+          initialDelaySeconds: 15
+          periodSeconds: 20
+      volumes:
+      - name: tmp-data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: meeting-backend-internal
+  namespace: meeting-app
+  labels:
+    app: meeting-backend
+    type: internal
+spec:
+  selector:
+    app: meeting-backend
+  ports:
+  - name: http-api
+    port: 5000
+    targetPort: http-api
+  - name: ws-api
+    port: 3001
+    targetPort: ws-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: meeting-backend-external
+  namespace: meeting-app
+  labels:
+    app: meeting-backend
+    type: external
+spec:
+  type: NodePort
+  selector:
+    app: meeting-backend
+  ports:
+  - name: http-api
+    port: 5000
+    targetPort: http-api
+    nodePort: 30963
+  - name: ws-api
+    port: 3001
+    targetPort: ws-api
+    nodePort: 30283 

@@ -1,0 +1,29 @@
+# Environment files
+.env
+.env.*
+config/secrets.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+dist/
+build/
+*.pyc
+__pycache__/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Operating System
+.DS_Store
+Thumbs.db 
