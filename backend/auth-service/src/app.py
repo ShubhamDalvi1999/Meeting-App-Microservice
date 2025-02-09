@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_migrate import Migrate
 from flask_wtf.csrf import CSRFProtect
@@ -23,12 +23,16 @@ logger = logging.getLogger(__name__)
 migrate = Migrate()
 csrf = CSRFProtect()
 rate_limiter = None
+cors = CORS()
 
 def create_app(config_name='development', initialize_db=True):
     app = Flask(__name__)
     
     # Load configuration
     app.config.from_object(config[config_name])
+    
+    # Enable debug mode if FLASK_DEBUG is set
+    app.debug = bool(int(os.getenv('FLASK_DEBUG', 0)))
     
     # Override config with environment variables if they exist
     app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', app.config['SECRET_KEY'])
@@ -45,14 +49,7 @@ def create_app(config_name='development', initialize_db=True):
     rate_limiter = RateLimiter(app.config['REDIS_URL'])
     
     # CORS configuration
-    CORS(app, resources={
-        r"/api/*": {
-            "origins": app.config['CORS_ORIGINS'],
-            "methods": app.config['CORS_METHODS'],
-            "allow_headers": app.config['CORS_HEADERS'],
-            "supports_credentials": True
-        }
-    })
+    cors.init_app(app)
     
     # CSRF configuration
     csrf.init_app(app)
@@ -76,11 +73,9 @@ def create_app(config_name='development', initialize_db=True):
             migrations_manager = MigrationsManager(app, db)
             migrations_manager.initialize_database()
 
-            # Seed data in development
-            if app.config['FLASK_ENV'] == 'development':
-                data_seeder = DataSeeder(app, db)
-                if not data_seeder.run_all_seeders():
-                    logger.error("Failed to seed data")
+            # Initialize data seeder
+            data_seeder = DataSeeder(app, db)
+            data_seeder.run_all_seeders()
 
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
@@ -96,9 +91,10 @@ def create_app(config_name='development', initialize_db=True):
         )
         scheduler.start()
 
+    # Health check endpoint
     @app.route('/health')
     def health_check():
-        return {'status': 'healthy', 'service': 'auth'}, 200
+        return jsonify({"status": "healthy"}), 200
 
     return app
 

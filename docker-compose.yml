@@ -1,175 +1,193 @@
 version: '3.8'
 
 services:
+  # Databases
   postgres:
     image: postgres:15-alpine
     environment:
-      - POSTGRES_DB=meetingapp
-      - POSTGRES_USER=dev_user
-      - POSTGRES_PASSWORD=dev-password-123
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dev_user -d meetingapp"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  auth-db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=${AUTH_DB_NAME}
+      - POSTGRES_USER=${AUTH_DB_USER}
+      - POSTGRES_PASSWORD=${AUTH_DB_PASSWORD}
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./data/auth-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AUTH_DB_USER} -d ${AUTH_DB_NAME}"]
+      interval: 5s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass dev-redis-123
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - ./data/redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "dev-redis-123", "ping"]
-      interval: 10s
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
       timeout: 5s
       retries: 5
 
-  backend:
+  # Backend Services
+  auth-service:
     build:
-      context: ./backend/flask-service
-      dockerfile: Dockerfile
+      context: ./backend
+      dockerfile: auth-service/Dockerfile
     environment:
       - FLASK_APP=src.app
-      - FLASK_ENV=development
       - FLASK_DEBUG=1
+      - DATABASE_URL=${AUTH_DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - SERVICE_KEY=${SERVICE_KEY}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - SMTP_SERVER=${SMTP_SERVER}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - FRONTEND_URL=${FRONTEND_URL}
       - PYTHONPATH=/app
-      - DATABASE_URL=postgresql://dev_user:dev-password-123@postgres:5432/meetingapp
-      - REDIS_URL=redis://:dev-redis-123@redis:6379/0
-      - JWT_SECRET_KEY=dev-jwt-secret-123
-      - CORS_ORIGINS=http://localhost:3000
-      - AUTH_SERVICE_URL=http://auth-service:5001
-      - AUTH_SERVICE_KEY=dev-service-key-123
-      - SERVICE_SYNC_ENABLED=true
-      - PYTHONUNBUFFERED=1
-    ports:
-      - "5000:5000"
+      - AUTH_DB_USER=${AUTH_DB_USER}
+      - AUTH_DB_PASSWORD=${AUTH_DB_PASSWORD}
+      - AUTH_DB_NAME=${AUTH_DB_NAME}
     volumes:
-      - ./backend/flask-service:/app
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      auth-service:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    restart: unless-stopped
-
-  websocket:
-    build:
-      context: ./backend/node-service
-      dockerfile: Dockerfile
-    environment:
-      - JWT_SECRET_KEY=dev-jwt-secret-123
-      - CORS_ORIGINS=http://localhost:3000
-      - REDIS_URL=redis://:dev-redis-123@redis:6379/0
-    ports:
-      - "3001:3001"
-    volumes:
-      - ./backend/node-service:/app
-      - /app/node_modules
-    depends_on:
-      redis:
-        condition: service_healthy
-      backend:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 15s
-    restart: unless-stopped
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:5000
-      - NEXT_PUBLIC_WS_URL=ws://localhost:3001
-      - NEXT_PUBLIC_BASE_URL=http://localhost:3000
-      - WATCHPACK_POLLING=true
-      - CHOKIDAR_USEPOLLING=true
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
-    depends_on:
-      backend:
-        condition: service_healthy
-      websocket:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-    restart: unless-stopped
-
-  auth-service:
-    build: 
-      context: ./backend/auth-service
-      dockerfile: Dockerfile
-    environment:
-      - AUTH_DATABASE_URL=postgresql://postgres:postgres@auth-db:5432/auth_db
-      - REDIS_URL=redis://redis:6379/0
-      - JWT_SECRET_KEY=dev-jwt-secret-123
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - FLASK_SERVICE_URL=http://backend:5000
-      - SERVICE_KEY=dev-service-key-123
-      - SERVICE_SYNC_ENABLED=true
-      - PYTHONPATH=/app:/app/backend
+      - ./backend/auth-service:/app/auth-service
+      - ./backend/shared:/app/shared
+      - ./logs/auth-service:/app/logs
+    working_dir: /app/auth-service
     ports:
       - "5001:5001"
-    volumes:
-      - ./backend/auth-service:/app
-      - ./backend/shared:/app/backend/shared
     depends_on:
       auth-db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-    restart: unless-stopped
 
-  auth-db:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_DB=auth_db
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+  backend:
+    build:
+      context: ./backend/flask-service
+      dockerfile: Dockerfile
     volumes:
-      - auth-db-data:/var/lib/postgresql/data
+      - ./backend/flask-service:/app
+      - ./logs:/app/logs
     ports:
-      - "5433:5432"
+      - "5000:5000"
+    environment:
+      - FLASK_APP=src.app
+      - FLASK_DEBUG=1
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - SERVICE_KEY=${SERVICE_KEY}
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d auth_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  websocket:
+    build:
+      context: ./backend/node-service
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend/node-service:/app
+      - ./logs:/app/logs
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=${REDIS_URL}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
+      - NEXT_PUBLIC_AUTH_URL=${NEXT_PUBLIC_AUTH_URL}
+      - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+      - websocket
+      - auth-service
+
+  # Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3002:3000"
+    depends_on:
+      - prometheus
 
 volumes:
-  postgres_data:
-  redis_data:
-  auth-db-data: 
+  prometheus_data:
+  grafana_data: 

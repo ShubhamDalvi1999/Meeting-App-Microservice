@@ -8,119 +8,82 @@ class WebRTCSignaling {
   }
 
   handleJoin(socket, roomId) {
-    try {
-      // Join the room
-      socket.join(roomId);
-      
-      // Initialize room if it doesn't exist
-      if (!this.rooms.has(roomId)) {
-        this.rooms.set(roomId, new Set());
-      }
-      
-      const room = this.rooms.get(roomId);
-      room.add(socket.id);
-
-      // Notify others in the room
-      socket.to(roomId).emit('peer_joined', {
-        peerId: socket.id,
-        userId: socket.userId,
-        username: socket.user.username
-      });
-
-      // Send list of existing peers to the new participant
-      const peers = Array.from(room).filter(id => id !== socket.id);
-      socket.emit('room_users', {
-        peers: peers.map(peerId => ({
-          peerId,
-          userId: this.io.sockets.sockets.get(peerId)?.userId,
-          username: this.io.sockets.sockets.get(peerId)?.user?.username
-        }))
-      });
-
-      logger.info(`User ${socket.userId} joined room ${roomId}`);
-      metrics.activeRooms.set(this.rooms.size);
-      metrics.usersPerRoom.set({ room: roomId }, room.size);
-    } catch (error) {
-      logger.error('Error in handleJoin:', error);
-      socket.emit('error', { message: 'Failed to join room' });
+    logger.info(`User ${socket.id} joining room ${roomId}`);
+    socket.join(roomId);
+    
+    if (!this.rooms.has(roomId)) {
+      this.rooms.set(roomId, new Set());
     }
+    this.rooms.get(roomId).add(socket.id);
+
+    // Notify others in the room
+    socket.to(roomId).emit('user-joined', { userId: socket.id });
+
+    // Send list of existing peers to the new participant
+    const peers = Array.from(this.rooms.get(roomId)).filter(id => id !== socket.id);
+    socket.emit('room_users', {
+      peers: peers.map(peerId => ({
+        peerId,
+        userId: this.io.sockets.sockets.get(peerId)?.userId,
+        username: this.io.sockets.sockets.get(peerId)?.user?.username
+      }))
+    });
+
+    logger.info(`User ${socket.userId} joined room ${roomId}`);
+    metrics.activeRooms.set(this.rooms.size);
+    metrics.usersPerRoom.set({ room: roomId }, this.rooms.get(roomId).size);
   }
 
   handleLeave(socket, roomId) {
-    try {
-      socket.leave(roomId);
-      
-      const room = this.rooms.get(roomId);
-      if (room) {
-        room.delete(socket.id);
-        
-        if (room.size === 0) {
-          this.rooms.delete(roomId);
-        }
-
-        // Notify others that peer has left
-        socket.to(roomId).emit('peer_left', {
-          peerId: socket.id,
-          userId: socket.userId
-        });
-
-        logger.info(`User ${socket.userId} left room ${roomId}`);
-        metrics.activeRooms.set(this.rooms.size);
-        metrics.usersPerRoom.set({ room: roomId }, room.size);
+    logger.info(`User ${socket.id} leaving room ${roomId}`);
+    socket.leave(roomId);
+    
+    if (this.rooms.has(roomId)) {
+      this.rooms.get(roomId).delete(socket.id);
+      if (this.rooms.get(roomId).size === 0) {
+        this.rooms.delete(roomId);
       }
-    } catch (error) {
-      logger.error('Error in handleLeave:', error);
     }
+
+    // Notify others in the room
+    socket.to(roomId).emit('user-left', { userId: socket.id });
+
+    logger.info(`User ${socket.userId} left room ${roomId}`);
+    metrics.activeRooms.set(this.rooms.size);
+    metrics.usersPerRoom.set({ room: roomId }, this.rooms.get(roomId)?.size || 0);
   }
 
   handleOffer(socket, data) {
-    try {
-      const { targetId, sdp } = data;
-      
-      socket.to(targetId).emit('rtc_offer', {
-        sdp,
-        offererId: socket.id,
-        userId: socket.userId
-      });
+    const { targetId, offer } = data;
+    logger.info(`Relaying offer from ${socket.id} to ${targetId}`);
+    this.io.to(targetId).emit('offer', {
+      userId: socket.id,
+      offer
+    });
 
-      metrics.webrtcOffers.inc();
-    } catch (error) {
-      logger.error('Error in handleOffer:', error);
-      socket.emit('error', { message: 'Failed to send offer' });
-    }
+    metrics.webrtcOffers.inc();
   }
 
   handleAnswer(socket, data) {
-    try {
-      const { targetId, sdp } = data;
-      
-      socket.to(targetId).emit('rtc_answer', {
-        sdp,
-        answererId: socket.id,
-        userId: socket.userId
-      });
+    const { targetId, answer } = data;
+    logger.info(`Relaying answer from ${socket.id} to ${targetId}`);
+    this.io.to(targetId).emit('answer', {
+      userId: socket.id,
+      answer
+    });
 
-      metrics.webrtcAnswers.inc();
-    } catch (error) {
-      logger.error('Error in handleAnswer:', error);
-      socket.emit('error', { message: 'Failed to send answer' });
-    }
+    metrics.webrtcAnswers.inc();
   }
 
   handleIceCandidate(socket, data) {
-    try {
-      const { targetId, candidate } = data;
-      
-      socket.to(targetId).emit('ice_candidate', {
-        candidate,
-        senderId: socket.id
-      });
+    const { targetId, candidate } = data;
+    logger.info(`Relaying ICE candidate from ${socket.id} to ${targetId}`);
+    this.io.to(targetId).emit('ice-candidate', {
+      userId: socket.id,
+      candidate
+    });
 
-      metrics.iceCandidates.inc();
-    } catch (error) {
-      logger.error('Error in handleIceCandidate:', error);
-      socket.emit('error', { message: 'Failed to send ICE candidate' });
-    }
+    metrics.iceCandidates.inc();
   }
 
   // Handle media stream events
@@ -143,6 +106,15 @@ class WebRTCSignaling {
     socket.to(roomId).emit('peer_connection_state', {
       userId: socket.userId,
       state
+    });
+  }
+
+  handleDisconnect(socket) {
+    // Remove user from all rooms they were in
+    this.rooms.forEach((users, roomId) => {
+      if (users.has(socket.id)) {
+        this.handleLeave(socket, roomId);
+      }
     });
   }
 }

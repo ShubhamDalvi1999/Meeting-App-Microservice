@@ -1,0 +1,29 @@
+from setuptools import setup, find_packages
+
+setup(
+    name="auth-service",
+    version="0.1.0",
+    packages=find_packages(),
+    install_requires=[
+        'Flask==2.3.3',
+        'Flask-SQLAlchemy==3.0.5',
+        'Flask-Migrate==4.0.4',
+        'Flask-Cors==4.0.0',
+        'Flask-WTF==1.2.1',
+        'psycopg2-binary==2.9.7',
+        'python-dotenv==1.0.0',
+        'PyJWT==2.8.0',
+        'bcrypt==4.0.1',
+        'google-auth-oauthlib==1.0.0',
+        'requests==2.31.0',
+        'email-validator==2.0.0.post2',
+        'redis==5.0.0',
+        'pydantic>=2.5.2',
+        'gunicorn==21.2.0',
+        'APScheduler==3.10.4',
+        'tenacity==8.2.3',
+        'circuitbreaker==1.4.0',
+        'prometheus-client==0.19.0',
+        'sentry-sdk==1.39.1'
+    ],
+) 

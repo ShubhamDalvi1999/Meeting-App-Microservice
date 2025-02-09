@@ -4,140 +4,93 @@ const { metrics } = require('../utils/metrics');
 class WhiteboardService {
   constructor(io) {
     this.io = io;
-    this.whiteboards = new Map(); // roomId -> { strokes: [], undoStack: [] }
+    this.whiteboards = new Map();
   }
 
   handleDraw(socket, data) {
-    try {
-      const { roomId, stroke } = data;
-
-      // Initialize whiteboard for room if it doesn't exist
-      if (!this.whiteboards.has(roomId)) {
-        this.whiteboards.set(roomId, {
-          strokes: [],
-          undoStack: []
-        });
-      }
-
-      const whiteboard = this.whiteboards.get(roomId);
-      
-      // Add stroke data
-      const strokeData = {
-        id: Date.now().toString(),
-        userId: socket.userId,
-        username: socket.user.username,
-        ...stroke,
-        timestamp: new Date().toISOString()
-      };
-
-      whiteboard.strokes.push(strokeData);
-      whiteboard.undoStack = []; // Clear redo stack on new stroke
-
-      // Broadcast stroke to room
-      socket.to(roomId).emit('whiteboard_draw', strokeData);
-
-      // Update metrics
-      metrics.whiteboardStrokes.inc();
-      logger.info(`New whiteboard stroke in room ${roomId} by user ${socket.userId}`);
-    } catch (error) {
-      logger.error('Error in handleDraw:', error);
-      socket.emit('error', { message: 'Failed to draw stroke' });
+    const { roomId, path } = data;
+    logger.info(`New drawing in room ${roomId} from user ${socket.id}`);
+    
+    if (!this.whiteboards.has(roomId)) {
+      this.whiteboards.set(roomId, {
+        paths: [],
+        undoStack: [],
+        redoStack: []
+      });
     }
+
+    const whiteboard = this.whiteboards.get(roomId);
+    whiteboard.paths.push({
+      userId: socket.id,
+      path,
+      timestamp: Date.now()
+    });
+    whiteboard.redoStack = []; // Clear redo stack on new draw
+
+    this.io.to(roomId).emit('draw', {
+      userId: socket.id,
+      path
+    });
   }
 
   handleClear(socket, data) {
-    try {
-      const { roomId } = data;
-
-      if (this.whiteboards.has(roomId)) {
-        const whiteboard = this.whiteboards.get(roomId);
-        
-        // Store current state in undo stack
-        whiteboard.undoStack.push([...whiteboard.strokes]);
-        whiteboard.strokes = [];
-
-        // Broadcast clear to room
-        socket.to(roomId).emit('whiteboard_clear', {
-          userId: socket.userId,
-          username: socket.user.username,
-          timestamp: new Date().toISOString()
-        });
-
-        // Update metrics
-        metrics.whiteboardClears.inc();
-        logger.info(`Whiteboard cleared in room ${roomId} by user ${socket.userId}`);
-      }
-    } catch (error) {
-      logger.error('Error in handleClear:', error);
-      socket.emit('error', { message: 'Failed to clear whiteboard' });
+    const { roomId } = data;
+    logger.info(`Clearing whiteboard in room ${roomId}`);
+    
+    if (this.whiteboards.has(roomId)) {
+      const whiteboard = this.whiteboards.get(roomId);
+      whiteboard.undoStack.push([...whiteboard.paths]);
+      whiteboard.paths = [];
+      whiteboard.redoStack = [];
     }
+
+    this.io.to(roomId).emit('clear', {
+      userId: socket.id
+    });
   }
 
   handleUndo(socket, data) {
-    try {
-      const { roomId } = data;
-
-      if (this.whiteboards.has(roomId)) {
-        const whiteboard = this.whiteboards.get(roomId);
+    const { roomId } = data;
+    
+    if (this.whiteboards.has(roomId)) {
+      const whiteboard = this.whiteboards.get(roomId);
+      if (whiteboard.paths.length > 0) {
+        const lastPath = whiteboard.paths.pop();
+        whiteboard.undoStack.push(lastPath);
         
-        if (whiteboard.strokes.length > 0) {
-          // Store current state for redo
-          const lastStroke = whiteboard.strokes.pop();
-          whiteboard.undoStack.push(lastStroke);
-
-          // Broadcast undo to room
-          socket.to(roomId).emit('whiteboard_undo', {
-            userId: socket.userId,
-            username: socket.user.username,
-            strokeId: lastStroke.id,
-            timestamp: new Date().toISOString()
-          });
-
-          // Update metrics
-          metrics.whiteboardUndos.inc();
-          logger.info(`Stroke undone in room ${roomId} by user ${socket.userId}`);
-        }
+        this.io.to(roomId).emit('undo', {
+          userId: socket.id,
+          pathId: lastPath.timestamp
+        });
       }
-    } catch (error) {
-      logger.error('Error in handleUndo:', error);
-      socket.emit('error', { message: 'Failed to undo stroke' });
     }
   }
 
   handleRedo(socket, data) {
-    try {
-      const { roomId } = data;
-
-      if (this.whiteboards.has(roomId)) {
-        const whiteboard = this.whiteboards.get(roomId);
+    const { roomId } = data;
+    
+    if (this.whiteboards.has(roomId)) {
+      const whiteboard = this.whiteboards.get(roomId);
+      if (whiteboard.undoStack.length > 0) {
+        const pathToRedo = whiteboard.undoStack.pop();
+        whiteboard.paths.push(pathToRedo);
         
-        if (whiteboard.undoStack.length > 0) {
-          // Restore last undone stroke
-          const strokeToRedo = whiteboard.undoStack.pop();
-          whiteboard.strokes.push(strokeToRedo);
-
-          // Broadcast redo to room
-          socket.to(roomId).emit('whiteboard_redo', {
-            userId: socket.userId,
-            username: socket.user.username,
-            stroke: strokeToRedo,
-            timestamp: new Date().toISOString()
-          });
-
-          // Update metrics
-          metrics.whiteboardRedos.inc();
-          logger.info(`Stroke redone in room ${roomId} by user ${socket.userId}`);
-        }
+        this.io.to(roomId).emit('redo', {
+          userId: socket.id,
+          path: pathToRedo.path
+        });
       }
-    } catch (error) {
-      logger.error('Error in handleRedo:', error);
-      socket.emit('error', { message: 'Failed to redo stroke' });
     }
+  }
+
+  handleDisconnect(socket) {
+    // No cleanup needed for whiteboard data
+    // Data persists until room is deleted
   }
 
   // Get current whiteboard state for a room
   getWhiteboardState(roomId) {
-    return this.whiteboards.get(roomId) || { strokes: [], undoStack: [] };
+    return this.whiteboards.get(roomId) || { paths: [], undoStack: [], redoStack: [] };
   }
 }
 

@@ -1,0 +1,26 @@
+# Build all services
+docker-compose build
+
+# Start the core services first
+docker-compose up -d postgres auth-db redis
+
+# Wait for about 10 seconds for databases to initialize
+sleep 10
+
+# Start the auth service
+docker-compose up -d auth-service
+
+# Wait for auth service to be ready
+sleep 10
+
+# Start remaining services
+docker-compose up -d backend websocket frontend
+
+# Wait for all services to be ready
+sleep 10
+
+# Start monitoring services
+docker-compose up -d prometheus grafana
+
+# Wait for monitoring services to be ready
+sleep 10
