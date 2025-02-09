@@ -26,14 +26,18 @@ interface DrawingObject {
   };
 }
 
-interface CanvasState {
+interface FabricCanvasJSON {
   version: string;
-  objects: DrawingObject[];
+  objects: fabric.Object[];
   background?: string;
 }
 
+interface CanvasState extends FabricCanvasJSON {
+  // Additional state properties if needed
+}
+
 interface WhiteboardState {
-  objects: DrawingObject[];
+  objects: fabric.Object[];
   background: string;
   dimensions: {
     width: number;
@@ -89,8 +93,13 @@ export function WhiteboardProvider({ children }: { children: React.ReactNode }) 
     newCanvas.freeDrawingBrush.width = currentBrushSize;
 
     newCanvas.on('object:added', () => {
-      const state = canvas?.toJSON() as CanvasState;
-      if (state) {
+      const rawState = canvas?.toJSON() as FabricCanvasJSON;
+      if (rawState) {
+        const state: CanvasState = {
+          version: rawState.version || '5.3.0',
+          objects: rawState.objects || [],
+          background: rawState.background
+        };
         historyRef.current.push(state);
         redoHistoryRef.current = [];
         updateUndoRedoState();
@@ -127,7 +136,10 @@ export function WhiteboardProvider({ children }: { children: React.ReactNode }) 
     canvas.isDrawingMode = mode === 'draw';
 
     if (mode === 'erase') {
-      canvas.freeDrawingBrush = new fabric.EraseBrush(canvas);
+      canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
+      canvas.freeDrawingBrush.color = '#ffffff';
+      canvas.freeDrawingBrush.width = 20;
+      canvas.isDrawingMode = true;
     } else if (mode === 'draw') {
       canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
       canvas.freeDrawingBrush.color = currentColor;
@@ -245,25 +257,25 @@ export function WhiteboardProvider({ children }: { children: React.ReactNode }) 
     canvas.renderAll();
   }, [canvas, currentColor]);
 
-  const saveState = useCallback((): WhiteboardState => {
+  const saveState = (): WhiteboardState => {
     if (!canvas) {
       return {
         objects: [],
         background: '#ffffff',
-        dimensions: { width: 0, height: 0 }
+        dimensions: { width: 800, height: 600 }
       };
     }
 
-    const state = canvas.toJSON() as CanvasState;
+    const rawState = canvas.toJSON() as FabricCanvasJSON;
     return {
-      objects: state.objects || [],
-      background: state.background || '#ffffff',
+      objects: rawState.objects,
+      background: rawState.background || '#ffffff',
       dimensions: {
-        width: canvas.width!,
-        height: canvas.height!
+        width: canvas.getWidth(),
+        height: canvas.getHeight()
       }
     };
-  }, [canvas]);
+  };
 
   const loadState = useCallback((state: WhiteboardState) => {
     if (!canvas) return;

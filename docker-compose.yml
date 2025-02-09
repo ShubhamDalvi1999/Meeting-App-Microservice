@@ -134,8 +134,12 @@ services:
       - FLASK_SERVICE_URL=http://backend:5000
       - SERVICE_KEY=dev-service-key-123
       - SERVICE_SYNC_ENABLED=true
+      - PYTHONPATH=/app:/app/backend
     ports:
       - "5001:5001"
+    volumes:
+      - ./backend/auth-service:/app
+      - ./backend/shared:/app/backend/shared
     depends_on:
       auth-db:
         condition: service_healthy

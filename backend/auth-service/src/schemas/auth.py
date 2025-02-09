@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, EmailStr, Field, validator, root_validator
-from .base import BaseSchema
+from shared.schemas.base import BaseSchema
 from pydantic.types import SecretStr
 
 class AuthUserBase(BaseSchema):

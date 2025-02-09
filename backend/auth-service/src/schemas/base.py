@@ -12,16 +12,4 @@ class BaseSchema(BaseModel):
 
     model_config = ConfigDict(json_encoders={
         datetime: lambda dt: dt.isoformat()
-    })
-
-class ErrorResponse(BaseModel):
-    """Standard error response schema"""
-    error: str
-    message: Optional[str] = None
-    details: Optional[dict] = None
-
-class SuccessResponse(BaseModel):
-    """Standard success response schema"""
-    status: str = "success"
-    message: Optional[str] = None
-    data: Optional[dict] = None 
+    }) 

@@ -13,12 +13,16 @@ from shared.middleware.rate_limiter import rate_limit
 from shared.middleware.auth import jwt_required
 from shared.schemas.base import ErrorResponse, SuccessResponse
 from ..schemas.auth import (
-    AuthUserCreate, AuthUserLogin, GoogleLogin, PasswordReset,
-    PasswordResetConfirm, SessionCreate, TokenRefresh, SessionRevoke
+    AuthUserCreate, AuthUserUpdate, AuthUserResponse, SessionCreate,
+    EmailVerificationCreate, AuthUserLogin, GoogleLogin, PasswordReset,
+    PasswordResetConfirm, TokenRefresh, SessionRevoke
 )
 from ..utils.email_service import send_verification_email
 from ..utils.auth import get_current_user, get_current_session
 import logging
+from ..utils.rate_limiter import rate_limit as custom_rate_limit
+from ..utils.database import with_transaction
+import string
 
 logger = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__)
@@ -26,157 +30,126 @@ auth_bp = Blueprint('auth', __name__)
 def validate_password(password):
     """Validate password strength"""
     if len(password) < 12:
-        return False
-    if not re.search(r'[A-Z]', password):
-        return False
-    if not re.search(r'[a-z]', password):
-        return False
-    if not re.search(r'\d', password):
-        return False
-    if not re.search(r'[@$!%*?&]', password):
-        return False
-    return True
+        return False, "Password must be at least 12 characters long"
+    
+    if not any(c.isupper() for c in password):
+        return False, "Password must contain at least one uppercase letter"
+    
+    if not any(c.islower() for c in password):
+        return False, "Password must contain at least one lowercase letter"
+    
+    if not any(c.isdigit() for c in password):
+        return False, "Password must contain at least one number"
+    
+    return True, None
 
 def generate_verification_token():
     """Generate a secure verification token"""
-    return secrets.token_urlsafe(32)
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(32))
 
 @auth_bp.route('/register', methods=['POST'])
-@rate_limit(requests=5, window=3600)  # 5 registrations per hour
-@validate_schema(AuthUserCreate)
-def register(data: AuthUserCreate):
-    """Register a new user"""
+@custom_rate_limit(limit=5, window=3600)  # 5 registrations per hour
+def register():
+    data = request.get_json()
+    
+    # Validate request data
     try:
-        with transaction():
-            # Check if user already exists
-            if AuthUser.query.filter_by(email=data.email.lower()).first():
-                return jsonify(ErrorResponse(
-                    error="Registration Error",
-                    message="Email already registered"
-                ).model_dump()), 409
-
-            # Create user
-            user = AuthUser.from_schema(data)
-            db.session.add(user)
-            db.session.flush()  # Get user ID without committing
-
-            # Create verification token
-            verification = user.create_verification_token()
-            db.session.add(verification)
-
-            # Send verification email
-            if not send_verification_email(user.email, verification.token):
-                raise Exception("Failed to send verification email")
-
-        return jsonify(SuccessResponse(
-            message="Registration successful",
-            data={"user": user.to_schema().model_dump()}
-        ).model_dump()), 201
-
+        user_data = AuthUserCreate(**data)
     except Exception as e:
-        logger.error(f"Registration error: {str(e)}")
-        return jsonify(ErrorResponse(
-            error="Registration Error",
-            message="Failed to register user"
-        ).model_dump()), 500
+        return jsonify({"error": str(e)}), 400
+    
+    # Validate password strength
+    is_valid, error = validate_password(user_data.password)
+    if not is_valid:
+        return jsonify({"error": error}), 400
+    
+    # Check if user exists
+    if AuthUser.query.filter_by(email=user_data.email).first():
+        return jsonify({"error": "Email already registered"}), 409
+    
+    # Create user
+    user = AuthUser.from_schema(user_data)
+    current_app.db.session.add(user)
+    current_app.db.session.commit()
+    
+    # Generate and send verification email
+    verification = user.create_verification_token()
+    if send_verification_email(user.email, verification.token):
+        return jsonify({"message": "Registration successful. Please check your email to verify your account."}), 201
+    else:
+        return jsonify({"error": "Failed to send verification email"}), 500
 
 @auth_bp.route('/verify-email/<token>', methods=['GET'])
-@rate_limit(requests=10, window=3600)  # 10 verification attempts per hour
+@custom_rate_limit(limit=10, window=3600)  # 10 verification attempts per hour
 @with_transaction
 def verify_email(token):
     verification = EmailVerification.query.filter_by(
         token=token,
         is_used=False
     ).first()
-
-    if not verification or verification.expires_at < datetime.utcnow():
-        return jsonify({'error': 'Invalid or expired verification token'}), 400
-
+    
+    if not verification or verification.is_expired():
+        return jsonify({"error": "Invalid or expired verification token"}), 400
+    
     user = verification.user
     user.is_email_verified = True
     verification.is_used = True
-
-    return jsonify({
-        'message': 'Email verified successfully',
-        'user': user.to_dict()
-    }), 200
+    
+    return jsonify({"message": "Email verified successfully"})
 
 @auth_bp.route('/resend-verification', methods=['POST'])
-@rate_limit(requests=3, window=3600)  # 3 resend attempts per hour
+@custom_rate_limit(limit=3, window=3600)  # 3 resend attempts per hour
 def resend_verification():
-    data = request.json
-    email = data.get('email')
-
-    if not email:
-        return jsonify({'error': 'Email is required'}), 400
-
-    user = AuthUser.query.filter_by(email=email.lower()).first()
+    data = request.get_json()
+    if not data or 'email' not in data:
+        return jsonify({"error": "Email is required"}), 400
+    
+    user = AuthUser.query.filter_by(email=data['email']).first()
     if not user:
-        return jsonify({'error': 'User not found'}), 404
-
+        return jsonify({"error": "User not found"}), 404
+    
     if user.is_email_verified:
-        return jsonify({'error': 'Email is already verified'}), 400
-
+        return jsonify({"error": "Email is already verified"}), 400
+    
     # Create new verification token
-    token = generate_verification_token()
-    verification = EmailVerification(
-        user_id=user.id,
-        token=token,
-        expires_at=datetime.utcnow() + timedelta(hours=24)
-    )
-    db.session.add(verification)
-    db.session.commit()
-
+    verification = user.create_verification_token()
+    
     # Send verification email
-    if not send_verification_email(user.email, token):
-        return jsonify({'error': 'Failed to send verification email'}), 500
-
-    return jsonify({
-        'message': 'Verification email sent successfully'
-    }), 200
+    if send_verification_email(user.email, verification.token):
+        return jsonify({"message": "Verification email sent"})
+    else:
+        return jsonify({"error": "Failed to send verification email"}), 500
 
 @auth_bp.route('/login', methods=['POST'])
-@rate_limit(requests=10, window=300)  # 10 login attempts per 5 minutes
-@validate_schema(AuthUserLogin)
-def login(data: AuthUserLogin):
-    """User login"""
+@custom_rate_limit(limit=10, window=300)  # 10 login attempts per 5 minutes
+def login():
+    data = request.get_json()
+    
     try:
-        user = AuthUser.query.filter_by(email=data.email.lower()).first()
-        if not user or not user.check_password(data.password):
-            return jsonify(ErrorResponse(
-                error="Authentication Error",
-                message="Invalid email or password"
-            ).model_dump()), 401
-
-        if user.is_locked():
-            return jsonify(ErrorResponse(
-                error="Authentication Error",
-                message="Account is locked. Please try again later"
-            ).model_dump()), 403
-
-        with transaction():
-            # Create session
-            session = user.create_session(data.device_info)
-            
-            # Update user login info
-            user.last_login = datetime.utcnow()
-            user.failed_login_attempts = 0
-            
-            return jsonify(SuccessResponse(
-                message="Login successful",
-                data={
-                    "token": session.token,
-                    "refresh_token": session.refresh_token,
-                    "user": user.to_schema().model_dump()
-                }
-            ).model_dump())
-
+        login_data = AuthUserLogin(**data)
     except Exception as e:
-        logger.error(f"Login error: {str(e)}")
-        return jsonify(ErrorResponse(
-            error="Authentication Error",
-            message="Login failed"
-        ).model_dump()), 500
+        return jsonify({"error": str(e)}), 400
+    
+    user = AuthUser.query.filter_by(email=login_data.email).first()
+    if not user or not user.check_password(login_data.password):
+        return jsonify({"error": "Invalid email or password"}), 401
+    
+    if not user.is_email_verified:
+        return jsonify({"error": "Please verify your email before logging in"}), 403
+    
+    # Create session
+    session = user.create_session(
+        device_info=login_data.device_info
+    )
+    current_app.db.session.add(session)
+    current_app.db.session.commit()
+    
+    return jsonify({
+        "token": session.token,
+        "refresh_token": session.refresh_token,
+        "user": AuthUserResponse.from_orm(user).dict()
+    })
 
 @auth_bp.route('/google/login', methods=['POST'])
 @validate_schema(GoogleLogin)
@@ -243,7 +216,7 @@ def google_login(data: GoogleLogin):
         ).model_dump()), 500
 
 @auth_bp.route('/reset-password', methods=['POST'])
-@rate_limit(requests=3, window=3600)  # 3 reset attempts per hour
+@custom_rate_limit(limit=3, window=3600)  # 3 reset attempts per hour
 @validate_schema(PasswordReset)
 def reset_password(data: PasswordReset):
     """Initiate password reset"""
