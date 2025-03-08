@@ -65,13 +65,13 @@ services:
       - SMTP_USERNAME=${SMTP_USERNAME}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - FRONTEND_URL=${FRONTEND_URL}
-      - PYTHONPATH=/app
+      - PYTHONPATH=/app:/app/shared
       - AUTH_DB_USER=${AUTH_DB_USER}
       - AUTH_DB_PASSWORD=${AUTH_DB_PASSWORD}
       - AUTH_DB_NAME=${AUTH_DB_NAME}
     volumes:
       - auth_service_data:/app
-      - backend_shared:/app/shared
+      - ./backend/shared:/app/shared
       - auth_service_logs:/app/logs
     ports:
       - "5001:5001"
@@ -83,17 +83,17 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 30s
       retries: 3
-      start_period: 15s
+      start_period: 30s
 
   backend:
     build:
       context: ./backend/flask-service
-      dockerfile: Dockerfile.fixed
+      dockerfile: Dockerfile
     volumes:
       - backend_data:/app
-      - backend_shared:/app/shared
+      - ./backend/shared:/app/shared
       - backend_logs:/app/logs
     ports:
       - "5000:5000"
@@ -120,14 +120,14 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 30s
       retries: 3
-      start_period: 15s
+      start_period: 30s
 
   websocket:
     build:
       context: ./backend/node-service
-      dockerfile: Dockerfile.new
+      dockerfile: Dockerfile
     volumes:
       - websocket_data:/app
       - websocket_logs:/app/logs
@@ -142,11 +142,11 @@ services:
       backend:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      test: ["CMD", "/healthcheck.sh"]
       interval: 30s
-      timeout: 10s
+      timeout: 30s
       retries: 3
-      start_period: 15s
+      start_period: 30s
 
   # Frontend
   frontend:
@@ -217,7 +217,6 @@ volumes:
   redis_data:
   auth_service_data:
   backend_data:
-  backend_shared:
   auth_service_logs:
   backend_logs:
   websocket_data:

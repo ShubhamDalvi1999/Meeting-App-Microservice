@@ -1,22 +1,54 @@
 from flask import Blueprint, jsonify, current_app
 import requests
 import time
+import os
+import sys
 from datetime import datetime, timezone
 import logging
+import platform
 from sqlalchemy import text
-from ..database import db
+from sqlalchemy.exc import SQLAlchemyError
+
+# Handle import based on whether we're using the application db or directly importing
+try:
+    from ..database import db
+except ImportError:
+    try:
+        from shared.database import db
+    except ImportError:
+        db = None
+        logging.error("Failed to import database module")
 
 logger = logging.getLogger(__name__)
 health_bp = Blueprint('health', __name__)
 
 @health_bp.route('/health', methods=['GET'])
 def health_check():
-    """Basic health check endpoint"""
-    return jsonify({
+    """Basic health check endpoint that provides essential system information"""
+    health_info = {
         'status': 'healthy',
         'service': 'backend',
-        'timestamp': datetime.now(timezone.utc).isoformat()
-    })
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'environment': os.environ.get('FLASK_ENV', 'unknown'),
+        'system_info': {
+            'python_version': sys.version,
+            'platform': platform.platform(),
+            'node': platform.node()
+        }
+    }
+    
+    # Basic database check
+    try:
+        if db is not None:
+            db.session.execute(text('SELECT 1'))
+        else:
+            health_info['status'] = 'degraded'
+            health_info['message'] = 'Database module not available'
+    except Exception as e:
+        health_info['status'] = 'unhealthy'
+        health_info['error'] = str(e)
+    
+    return jsonify(health_info)
 
 @health_bp.route('/health/detailed', methods=['GET'])
 def detailed_health_check():

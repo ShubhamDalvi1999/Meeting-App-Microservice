@@ -3,6 +3,7 @@ from typing import Any, Callable, Optional, TypeVar, List
 from flask import current_app
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from contextlib import contextmanager
+from shared.database import db, transaction  # Import from shared.database
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,24 +14,14 @@ T = TypeVar('T')
 def transaction_context():
     """
     Context manager for database transactions.
-    Automatically handles commit and rollback.
+    Alias for shared.database.transaction to maintain compatibility.
     
     Usage:
         with transaction_context() as session:
             session.add(user)
     """
-    from flask_sqlalchemy import SQLAlchemy
-    db = SQLAlchemy()
-    
-    try:
+    with transaction():
         yield db.session
-        db.session.commit()
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Transaction error: {str(e)}")
-        raise
-    finally:
-        db.session.close()
 
 def with_transaction(f: Callable[..., T]) -> Callable[..., T]:
     """
@@ -44,9 +35,6 @@ def with_transaction(f: Callable[..., T]) -> Callable[..., T]:
     """
     @wraps(f)
     def decorated(*args: Any, **kwargs: Any) -> T:
-        from flask_sqlalchemy import SQLAlchemy
-        db = SQLAlchemy()
-        
         try:
             result = f(*args, **kwargs)
             if db.session.is_active:
@@ -58,12 +46,17 @@ def with_transaction(f: Callable[..., T]) -> Callable[..., T]:
             logger.error(f"Database error in {f.__name__}: {str(e)}")
             raise
         finally:
-            db.session.close()
+            if db.session:
+                db.session.close()
     return decorated
 
 class DatabaseManager:
-    def __init__(self, db):
-        self.db = db
+    """
+    Utility class for handling database operations safely
+    with automatic error handling and transactions.
+    """
+    def __init__(self, db_instance):
+        self.db = db_instance
 
     def safe_commit(self) -> bool:
         """Safely commit database changes with automatic rollback on error"""
@@ -72,10 +65,8 @@ class DatabaseManager:
             return True
         except SQLAlchemyError as e:
             self.db.session.rollback()
-            logger.error(f"Error during database commit: {str(e)}")
-            raise
-        finally:
-            self.db.session.close()
+            logger.error(f"Failed to commit changes: {str(e)}")
+            return False
 
     def safe_add(self, obj: Any, auto_commit: bool = True) -> bool:
         """Safely add an object to the database"""

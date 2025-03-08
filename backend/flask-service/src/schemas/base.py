@@ -1,3 +1,12 @@
+"""
+This module re-exports the shared schema base classes to maintain
+backward compatibility with code that imports from here.
+"""
+
+from shared.schemas.base import BaseSchema as SharedBaseSchema
+from shared.schemas.base import ErrorResponse, SuccessResponse
+
+# For backward compatibility, provide a marshmallow-based BaseSchema
 from marshmallow import Schema, fields, EXCLUDE
 
 class BaseSchema(Schema):

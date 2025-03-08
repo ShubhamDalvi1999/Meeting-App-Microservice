@@ -6,6 +6,9 @@ import os
 import redis
 import logging
 
+# Import from shared modules
+from shared.database import db
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,7 +44,6 @@ app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY')
 
 try:
     # Initialize extensions
-    db = SQLAlchemy(app)
     migrate = Migrate(app, db)
     logger.info("Database initialized successfully")
 except Exception as e:

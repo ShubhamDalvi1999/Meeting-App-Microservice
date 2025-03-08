@@ -14,6 +14,17 @@ The application is built using a microservices architecture consisting of:
 - **Redis**: For caching, pub/sub messaging, and session storage
 - **Monitoring**: Prometheus and Grafana for metrics and monitoring
 
+### Advanced Features
+
+The application includes several advanced features for enterprise-grade deployments:
+
+- **Service Discovery**: Dynamic service location and communication between microservices
+- **Secret Management**: Secure handling of sensitive information across various backends
+- **Integration Testing**: Comprehensive testing of service interactions
+- **Centralized Logging**: Structured logging with correlation IDs across services
+- **Circuit Breaking**: Resilient service communication with automatic failure handling
+- **Performance Monitoring**: Real-time metrics and monitoring
+
 ## Prerequisites
 
 - Docker and Docker Compose
@@ -22,9 +33,9 @@ The application is built using a microservices architecture consisting of:
 
 ### Windows-Specific Requirements
 
-- Docker Desktop with WSL2 backend recommended
+- Docker Desktop
 - PowerShell 5.0 or higher for running scripts
-- Git Bash or WSL2 for bash scripts (optional)
+- Git Bash for bash scripts (optional)
 
 ## Quick Start
 
@@ -146,8 +157,67 @@ docker-compose logs -f <service-name>
 
 ### Running Tests
 
+#### Unit Tests
+
 ```bash
 docker-compose -f docker-compose.test.yml up
+```
+
+#### Integration Tests
+
+Run integration tests to verify service interactions:
+
+```bash
+# For Windows
+.\run-integration-tests.ps1
+
+# For Linux/macOS
+chmod +x run-integration-tests.sh
+./run-integration-tests.sh
+```
+
+## Advanced Features
+
+### Service Discovery
+
+The application includes a flexible service discovery system that supports multiple backends:
+
+- **Environment Variables**: Simple configuration for development
+- **Static Configuration**: JSON/YAML-based configuration for Docker Compose
+- **Consul**: For production deployments with health checks
+- **Kubernetes**: Native service discovery in Kubernetes environments
+
+For more information, see the [Service Discovery Documentation](backend/shared/discovery/README.md).
+
+### Secret Management
+
+Secure handling of sensitive information with support for multiple backends:
+
+- **Environment Variables**: Simple configuration for development
+- **File-Based**: For Docker and Kubernetes secrets
+- **HashiCorp Vault**: Advanced secret management with rotation
+- **AWS Secrets Manager**: Cloud-native secret management
+
+For more information, see the [Secret Management Documentation](backend/shared/secrets/README.md).
+
+### Integration Testing
+
+The application includes a comprehensive integration testing framework:
+
+- **Service Mocking**: Mock responses from dependent services
+- **Authentication Testing**: Verify authentication flows
+- **End-to-End Testing**: Test complete user journeys
+
+To run integration tests:
+
+```bash
+# For auth service
+cd backend/auth-service
+python -m pytest tests/integration
+
+# For backend service
+cd backend/flask-service
+python -m pytest tests/integration
 ```
 
 ## Troubleshooting
@@ -156,4 +226,108 @@ For common issues and solutions, please refer to the [Troubleshooting Guide](TRO
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+# Backend Architecture Standardization
+
+This document summarizes the standardization changes implemented to improve consistency, reliability, and maintainability across backend services.
+
+## Key Improvements
+
+1. **Standardized Configuration System**
+   - Unified configuration classes across services
+   - Environment-specific configs (development, testing, production)
+   - Service-specific configs (auth, flask, websocket)
+   - Consistent environment variable handling
+
+2. **Unified Logging Framework**
+   - Structured JSON logging with consistent formatting
+   - Request ID and correlation ID tracking in logs
+   - Configurable log levels and outputs
+   - Third-party library log level management
+
+3. **Consistent Middleware Architecture**
+   - Standard middleware interface
+   - Centralized middleware registration
+   - Request ID middleware for request tracking
+   - Fallback mechanisms for backward compatibility
+
+4. **Standardized Error Handling**
+   - Common error classes with consistent responses
+   - Structured error responses with request IDs
+   - Detailed logging of exceptions
+   - Consistent HTTP status codes
+
+5. **HTTP Utilities Standardization**
+   - Request ID propagation in HTTP requests
+   - Retry mechanisms for transient failures
+   - Consistent logging of HTTP requests
+   - Simplified API for common HTTP methods
+
+6. **Import System Improvements**
+   - Fallback mechanisms for backward compatibility
+   - Clear import paths for shared modules
+   - Graceful handling of missing dependencies
+
+7. **Application Factory Standardization**
+   - Consistent initialization across services
+   - Standard health check endpoints
+   - Unified extension registration
+   - Proper error handling during startup
+
+## Project Structure
+
+```
+backend/
+├── shared/                      # Shared modules used across services
+│   ├── __init__.py              # Shared module import helpers
+│   ├── config.py                # Standardized configuration
+│   ├── errors.py                # Common error classes
+│   ├── logging/                 # Logging framework
+│   │   ├── __init__.py          # Logging module exports
+│   │   └── config.py            # Logging configuration
+│   ├── middleware/              # Shared middleware
+│   │   ├── __init__.py          # Middleware registration
+│   │   └── request_id.py        # Request ID middleware
+│   └── utils/                   # Utility functions
+│       ├── __init__.py          # Utils module exports
+│       └── http.py              # HTTP request utilities
+├── auth-service/                # Authentication service
+│   └── src/
+│       ├── app.py               # Main application factory
+│       └── core/                # Core functionality
+└── flask-service/               # Main backend API service
+    └── src/
+        ├── app.py               # Main application factory
+        └── core/                # Core functionality
+```
+
+## Benefits of Standardization
+
+1. **Improved Maintainability**
+   - Consistent patterns make code easier to understand
+   - Reduced duplication across services
+   - Centralized configuration and error handling
+
+2. **Enhanced Reliability**
+   - Robust error handling and logging
+   - Request tracking across services
+   - Proper fallback mechanisms
+
+3. **Better Observability**
+   - Structured logs with request context
+   - Consistent health check endpoints
+   - Detailed error information
+
+4. **Simplified Development**
+   - Standard interfaces for common functionality
+   - Reduced cognitive load for developers
+   - Easier onboarding for new team members
+
+## Next Steps
+
+1. Add comprehensive test coverage for shared modules
+2. Implement distributed tracing with OpenTelemetry
+3. Add centralized metrics collection
+4. Create deployment automation for shared modules
+5. Add comprehensive documentation 

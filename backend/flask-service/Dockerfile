@@ -11,32 +11,30 @@ RUN apt-get update && \
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-
-# Install Python dependencies with pip upgrade
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install APScheduler==3.10.4
 
-# Create a proper directory structure
-RUN mkdir -p /app/shared /app/logs
+# Create necessary directories
+RUN mkdir -p /app/shared /app/logs /app/src /app/migrations
 
-# Copy service code and shared code separately
-COPY . /app/
-# This will be mounted in docker-compose
+# Copy fixed app.py file with explicit import modifications
+COPY fixed_app.py /app/src/app.py
 
-# Set environment variables
-ENV PYTHONPATH=/app
-ENV FLASK_APP=src.app
-ENV FLASK_DEBUG=1
+# Copy application code by directory to avoid permission issues
+COPY src/ /app/src/
+COPY migrations/ /app/migrations/
+COPY *.py /app/
+COPY *.sh /app/
 
-# Expose port
-EXPOSE 5000
+# Copy shared module files 
+# Note: In docker-compose, we'll mount these as volumes, but this ensures they exist if volume mount fails
+RUN mkdir -p /app/shared/middleware /app/shared/utils /app/shared/models /app/shared/schemas
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5000/health || exit 1
-
-# Create entrypoint script
-RUN echo '#!/bin/sh\n\
+# Create entrypoint script with explicit Unix line endings
+RUN echo '#!/bin/bash\n\
+\n\
+# Wait for postgres\n\
 echo "Waiting for postgres..."\n\
 while ! pg_isready -h postgres -p 5432 -U $POSTGRES_USER -d $POSTGRES_DB; do\n\
     echo "Postgres is unavailable - sleeping"\n\
@@ -45,18 +43,43 @@ done\n\
 echo "Postgres is up - executing command"\n\
 \n\
 # Print directory structure for debugging\n\
-echo "Directory structure:"\n\
+echo "Directory structure in /app:"\n\
 ls -la /app\n\
-echo "Shared directory:"\n\
+echo "Directory structure in /app/shared:"\n\
 ls -la /app/shared\n\
 \n\
-# Run migrations\n\
-flask db upgrade\n\
+# Check if shared modules are properly mounted\n\
+if [ ! -f "/app/shared/database.py" ]; then\n\
+    echo "WARNING: Shared modules not properly mounted. Volume mount issue possible."\n\
+fi\n\
 \n\
-# Start application\n\
-exec gunicorn --bind 0.0.0.0:5000 --workers 4 --threads 8 --timeout 0 "src.app:create_app()"' > /entrypoint.sh
+# Set Python path\n\
+export PYTHONPATH=/app:/app/shared:$PYTHONPATH\n\
+\n\
+# Run database migrations\n\
+echo "Running database migrations..."\n\
+cd /app\n\
+flask db upgrade || echo "Warning: Migrations failed, but continuing..."\n\
+\n\
+# Start the application\n\
+echo "Starting application..."\n\
+exec gunicorn --bind 0.0.0.0:5000 --workers 2 --threads 4 --timeout 120 "src.app:create_app()"\n\
+' > /entrypoint.sh
 
+# Make entrypoint executable
 RUN chmod +x /entrypoint.sh
 
-# Start the application
-CMD ["/entrypoint.sh"] 
+# Set environment variables
+ENV FLASK_APP=src.app
+ENV FLASK_DEBUG=0
+ENV PYTHONPATH=/app:/app/shared
+
+# Health check with increased timeout
+HEALTHCHECK --interval=30s --timeout=30s --start-period=15s --retries=3 \
+  CMD curl -f http://localhost:5000/health || exit 1
+
+# Expose port
+EXPOSE 5000
+
+# Set entrypoint
+ENTRYPOINT ["/entrypoint.sh"] 

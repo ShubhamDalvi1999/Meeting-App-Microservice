@@ -1,4 +1,5 @@
-from shared.database import transaction_context, with_transaction, DatabaseManager
+from shared.database import transaction_context
+from shared.utils.database import with_transaction, DatabaseManager
 from shared.middleware.validation import validate_schema
 from flask import current_app
 from sqlalchemy.exc import SQLAlchemyError

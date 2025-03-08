@@ -22,7 +22,6 @@ This document outlines common issues you might encounter when setting up or runn
 **Solutions:**
 - Make sure you're using the correct `.dockerignore` files in each service directory
 - On Windows, use `Dockerfile.fixed` for the backend service
-- On Windows, try using Docker Desktop with WSL2 backend for better compatibility
 - Ensure line endings are consistent (LF, not CRLF) in scripts copied to containers
 
 ### Issue: Docker containers exit immediately after starting
@@ -167,7 +166,6 @@ This document outlines common issues you might encounter when setting up or runn
 - Use `.dockerignore` files to exclude problem files/directories
 - Use explicit COPY commands in Dockerfile rather than copying entire directories
 - Set Git to use LF line endings: `git config --global core.autocrlf input`
-- Use Docker Desktop with WSL2 backend
 
 ### Issue: Scripts won't execute
 
