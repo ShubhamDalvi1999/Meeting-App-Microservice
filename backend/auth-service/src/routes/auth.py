@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, g
 from datetime import datetime, timedelta
 import bcrypt
 import jwt
@@ -23,9 +23,30 @@ import logging
 from ..utils.rate_limiter import rate_limit as custom_rate_limit
 from ..utils.database import with_transaction
 import string
+from functools import wraps
+from ..utils.token_service import TokenService
 
 logger = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__)
+
+def token_service():
+    """Get token service instance"""
+    return TokenService()
+
+def service_auth_required(f):
+    """Decorator to require service authentication key"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        service_key = request.headers.get('X-Service-Key')
+        expected_key = current_app.config.get('SERVICE_KEY')
+        
+        if not service_key or service_key != expected_key:
+            logger.warning(f"Invalid service key attempt from {request.remote_addr}")
+            return jsonify({"error": "Invalid service key"}), 403
+            
+        return f(*args, **kwargs)
+    
+    return decorated
 
 def validate_password(password):
     """Validate password strength"""
@@ -442,4 +463,66 @@ def logout():
         return jsonify(ErrorResponse(
             error="Logout Error",
             message="Failed to logout"
-        ).model_dump()), 500 
+        ).model_dump()), 500
+
+@auth_bp.route('/validate-token', methods=['POST'])
+@service_auth_required
+def validate_token():
+    """
+    Validate a JWT token
+    This endpoint is used by other services to validate tokens
+    """
+    try:
+        data = request.get_json()
+        if not data or 'token' not in data:
+            return jsonify({"error": "Token is required"}), 400
+            
+        token = data['token']
+        
+        try:
+            # First, try to decode the token
+            payload = jwt.decode(
+                token,
+                current_app.config['JWT_SECRET_KEY'],
+                algorithms=['HS256']
+            )
+            
+            # Check if user exists
+            user_id = payload.get('user_id')
+            if not user_id:
+                return jsonify({"error": "Invalid token: missing user_id"}), 401
+                
+            user = AuthUser.query.get(user_id)
+            if not user:
+                return jsonify({"error": "User not found"}), 401
+                
+            # Verify if token belongs to a valid session
+            session = UserSession.query.filter_by(
+                token=token,
+                revoked=False
+            ).first()
+            
+            if not session:
+                return jsonify({"error": "Invalid or revoked session"}), 401
+                
+            # Update last_used timestamp for the session
+            session.update_last_used()
+            
+            # Return payload with additional user info
+            response_data = {
+                **payload,
+                "is_active": not user.is_locked(),
+                "is_email_verified": user.is_email_verified,
+                "roles": user.roles
+            }
+            
+            return jsonify({"data": response_data}), 200
+            
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Token has expired"}), 401
+        except jwt.InvalidTokenError as e:
+            return jsonify({"error": f"Invalid token: {str(e)}"}), 401
+            
+    except Exception as e:
+        logger.error(f"Error validating token: {str(e)}")
+        return jsonify({"error": "Server error occurred during token validation"}), 500 

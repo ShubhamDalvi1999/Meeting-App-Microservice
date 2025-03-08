@@ -51,10 +51,12 @@ rate_limiter = None
 # Import blueprints
 from .routes.meetings import meetings_bp
 from .routes.auth_integration import bp as auth_integration_bp
+from .routes.health import health_bp
 
 # Import database management
 from .utils.migrations_manager import MigrationsManager
 from .utils.data_seeder import DataSeeder
+from .utils.auth_integration import AuthIntegration
 
 # Initialize Redis client (will be used for caching and rate limiting)
 from redis import Redis
@@ -158,6 +160,7 @@ def create_app(config_name='development', initialize_db=True):
     # Register blueprints
     app.register_blueprint(meetings_bp, url_prefix='/api/meetings')
     app.register_blueprint(auth_integration_bp, url_prefix='/api')
+    app.register_blueprint(health_bp, url_prefix='/api')  # Health checks
 
     # Initialize background tasks if APScheduler is available
     if has_apscheduler:
@@ -185,13 +188,28 @@ def create_app(config_name='development', initialize_db=True):
             replace_existing=True
         )
         
+        # Add token cache cleanup job to run every hour
+        def cleanup_token_cache():
+            with app.app_context():
+                auth_integration = AuthIntegration()
+                removed = auth_integration.cleanup_token_cache()
+                logger.info(f"Cleaned up {removed} expired token cache entries")
+                
+        scheduler.add_job(
+            func=cleanup_token_cache,
+            trigger=IntervalTrigger(hours=1),
+            id='cleanup_token_cache',
+            name='Clean up expired token cache entries',
+            replace_existing=True
+        )
+        
         # Start the scheduler
         scheduler.start()
         logger.info("Background scheduler started with cleanup and metrics jobs")
 
     @app.route('/health')
-    def health_check():
-        """Health check endpoint with service status"""
+    def quick_health_check():
+        """Simple health check endpoint for load balancers"""
         try:
             # Check database connection
             with app.app_context():

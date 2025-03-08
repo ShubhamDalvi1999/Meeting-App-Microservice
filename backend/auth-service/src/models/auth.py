@@ -3,6 +3,7 @@ from sqlalchemy.sql import func
 import bcrypt
 from ..schemas.auth import AuthUserCreate, AuthUserUpdate, AuthUserResponse, SessionCreate, EmailVerificationCreate
 from ..database import db
+from flask import current_app
 
 class AuthUser(db.Model):
     __tablename__ = 'auth_users'
@@ -263,7 +264,13 @@ class UserSession(db.Model):
     def update_last_used(self):
         """Update the last used timestamp"""
         self.last_used_at = datetime.utcnow()
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            current_app.logger.error(f"Error updating session last_used timestamp: {str(e)}")
+            return False
+        return True
 
 class EmailVerification(db.Model):
     __tablename__ = 'email_verifications'

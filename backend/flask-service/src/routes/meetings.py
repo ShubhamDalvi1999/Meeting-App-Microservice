@@ -1,18 +1,16 @@
 from flask import Blueprint, request, jsonify, current_app
-from functools import wraps
-import jwt
-import os
-from datetime import datetime, UTC
+from sqlalchemy.exc import SQLAlchemyError
+from datetime import datetime, timezone, UTC
 import bleach
 import json
 import time
-from sqlalchemy.exc import SQLAlchemyError
 from shared.middleware.auth import token_required
 from shared.middleware.error_handler import error_handler, APIError
 from shared.middleware.validation import validate_schema
 from shared.schemas.base import ErrorResponse, SuccessResponse
 from ..schemas.meeting import MeetingCreate, MeetingResponse, MeetingUpdate
 from ..models import db, User, Meeting, MeetingParticipant, MeetingCoHost, MeetingAuditLog
+from ..utils.auth_integration import enhanced_token_required
 
 meetings_bp = Blueprint('meetings', __name__)
 
@@ -45,39 +43,8 @@ def cache_meetings(cache_key, meetings, expiry=300):
     except Exception as e:
         current_app.logger.error(f"Error caching meetings: {e}")
 
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = request.headers.get('Authorization')
-        
-        if not token or not token.startswith('Bearer '):
-            return jsonify({'error': 'Invalid token format'}), 401
-            
-        try:
-            token = token.split('Bearer ')[1]
-            data = jwt.decode(token, os.getenv('JWT_SECRET_KEY'), algorithms=['HS256'])
-            current_user = User.query.get(data['user_id'])
-            
-            if not current_user:
-                return jsonify({'error': 'User not found'}), 401
-                
-        except jwt.ExpiredSignatureError:
-            return jsonify({'error': 'Token has expired', 'code': 'token_expired'}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({'error': 'Invalid token', 'code': 'token_invalid'}), 401
-        except jwt.InvalidKeyError:
-            return jsonify({'error': 'Invalid signing key', 'code': 'invalid_key'}), 401
-        except jwt.InvalidAlgorithmError:
-            return jsonify({'error': 'Invalid algorithm specified', 'code': 'invalid_algorithm'}), 401
-        except Exception as e:
-            return jsonify({'error': 'Authentication error', 'code': 'auth_error'}), 401
-            
-        return f(current_user, *args, **kwargs)
-        
-    return decorated
-
 @meetings_bp.route('/create', methods=['POST'])
-@token_required
+@enhanced_token_required
 @error_handler
 def create_meeting(current_user):
     """Create a new meeting."""
@@ -227,7 +194,7 @@ def create_meeting(current_user):
     return jsonify(response.model_dump()), 201
 
 @meetings_bp.route('/join/<int:id>', methods=['GET'])
-@token_required
+@enhanced_token_required
 def join_meeting(current_user, id):
     try:
         if id <= 0:
@@ -346,7 +313,7 @@ def join_meeting(current_user, id):
         return jsonify({'error': 'Server error occurred while joining meeting'}), 500
 
 @meetings_bp.route('/list', methods=['GET'])
-@token_required
+@enhanced_token_required
 @error_handler
 def list_meetings(current_user):
     """Get list of meetings for the current user with caching."""
@@ -403,7 +370,7 @@ def list_meetings(current_user):
     return jsonify(response_meetings)
 
 @meetings_bp.route('/<int:id>', methods=['GET'])
-@token_required
+@enhanced_token_required
 @error_handler
 def get_meeting(current_user, id):
     """Get a specific meeting by ID."""
@@ -420,7 +387,7 @@ def get_meeting(current_user, id):
     return jsonify(response.model_dump())
 
 @meetings_bp.route('/<int:id>', methods=['DELETE'])
-@token_required
+@enhanced_token_required
 @error_handler
 def delete_meeting(current_user, id):
     """Delete/cancel a meeting."""
@@ -481,7 +448,7 @@ def delete_meeting(current_user, id):
     ).model_dump())
 
 @meetings_bp.route('/stats', methods=['GET'])
-@token_required
+@enhanced_token_required
 @error_handler
 def get_meeting_stats(current_user):
     """Get meeting statistics for the current user."""
