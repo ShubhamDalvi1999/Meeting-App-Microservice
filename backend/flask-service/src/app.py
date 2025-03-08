@@ -77,9 +77,7 @@ def get_redis_client():
     return redis_client
 
 def create_app(config_name='development', initialize_db=True):
-    # Import os here to ensure it's available in this scope
-    import os
-    
+    # os is now imported at the top of the file
     app = Flask(__name__)
     
     # Ensure required environment variables are set

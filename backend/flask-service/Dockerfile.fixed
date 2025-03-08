@@ -53,7 +53,6 @@ try:\n\
     from config import config\n\
     print("Successfully imported shared modules from local shared directory")\n\
 except ImportError as e:\n\
-    print(f"Error importing from local shared: {e}")\n\
     # Try absolute import path (when PYTHONPATH includes shared)\n\
     try:\n\
         from shared.database import db, init_db\n\
@@ -63,19 +62,14 @@ except ImportError as e:\n\
         from shared.config import config\n\
         print("Successfully imported shared modules using absolute import")\n\
     except ImportError as e2:\n\
-        print(f"Error importing from absolute path: {e2}")\n\
         # Fallback to relative path\n\
-        try:\n\
-            sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))\n\
-            from backend.shared.database import db, init_db\n\
-            from backend.shared.middleware.error_handler import handle_api_errors\n\
-            from backend.shared.middleware.validation import validate_schema\n\
-            from backend.shared.middleware.rate_limiter import RateLimiter\n\
-            from backend.shared.config import config\n\
-            print("Successfully imported shared modules using relative import")\n\
-        except ImportError as e3:\n\
-            print(f"All import methods failed. Last error: {e3}")\n\
-            raise ImportError("Could not import shared modules using any method")\n\
+        sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))\n\
+        from backend.shared.database import db, init_db\n\
+        from backend.shared.middleware.error_handler import handle_api_errors\n\
+        from backend.shared.middleware.validation import validate_schema\n\
+        from backend.shared.middleware.rate_limiter import RateLimiter\n\
+        from backend.shared.config import config\n\
+        print("Successfully imported shared modules using relative import")\n\
 \n\
 from .routes.meetings import meetings_bp\n\
 from .routes.auth_integration import bp as auth_integration_bp\n\
@@ -100,9 +94,6 @@ csrf = CSRFProtect()\n\
 rate_limiter = None\n\
 \n\
 def create_app(config_name="development", initialize_db=True):\n\
-    # Import os here to ensure it is available in this scope\n\
-    import os\n\
-    \n\
     app = Flask(__name__)\n\
     \n\
     # Ensure required environment variables are set\n\

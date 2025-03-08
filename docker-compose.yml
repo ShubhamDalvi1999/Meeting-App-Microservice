@@ -207,7 +207,7 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
     ports:
-      - "3002:3000"
+      - "3003:3000"
     depends_on:
       - prometheus
 
