@@ -12,14 +12,16 @@ RUN apt-get update && \
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with pip upgrade
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy service code
-COPY . .
+# Create a proper directory structure
+RUN mkdir -p /app/shared /app/logs
 
-# Create logs directory with proper permissions
-RUN mkdir -p logs && chmod 777 logs
+# Copy service code and shared code separately
+COPY . /app/
+# This will be mounted in docker-compose
 
 # Set environment variables
 ENV PYTHONPATH=/app
@@ -41,9 +43,20 @@ while ! pg_isready -h postgres -p 5432 -U $POSTGRES_USER -d $POSTGRES_DB; do\n\
     sleep 1\n\
 done\n\
 echo "Postgres is up - executing command"\n\
+\n\
+# Print directory structure for debugging\n\
+echo "Directory structure:"\n\
+ls -la /app\n\
+echo "Shared directory:"\n\
+ls -la /app/shared\n\
+\n\
+# Run migrations\n\
 flask db upgrade\n\
-exec gunicorn --bind 0.0.0.0:5000 --workers 4 --threads 8 --timeout 0 "src.app:create_app()"' > /entrypoint.sh \
-    && chmod +x /entrypoint.sh
+\n\
+# Start application\n\
+exec gunicorn --bind 0.0.0.0:5000 --workers 4 --threads 8 --timeout 0 "src.app:create_app()"' > /entrypoint.sh
+
+RUN chmod +x /entrypoint.sh
 
 # Start the application
 CMD ["/entrypoint.sh"] 

@@ -15,11 +15,12 @@ COPY package*.json ./
 RUN npm install && \
     npm cache clean --force
 
-# Copy service code
-COPY . .
+# Create directories
+RUN mkdir -p /app/logs /app/src
 
-# Create logs directory
-RUN mkdir -p logs
+# Copy source code separately to avoid permission issues
+COPY src/ /app/src/
+COPY *.js /app/
 
 # Set environment
 ENV NODE_ENV=production

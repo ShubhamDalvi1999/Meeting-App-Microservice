@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=meetingapp
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres123
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d meetingapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass dev-redis-123
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "dev-redis-123", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: test-backend-with-apscheduler
+    command: python -c "import flask; print('Flask version:', flask.__version__); import flask_wtf; print('Flask-WTF version:', flask_wtf.__version__); import apscheduler; print('APScheduler version:', apscheduler.__version__); import sys; print(sys.path)"
+    volumes:
+      - ./backend/flask-service:/app
+      - ./backend/shared:/app/shared
+    environment:
+      - PYTHONPATH=/app:/app/shared
+    depends_on:
+      - postgres
+      - redis
+
+  websocket:
+    image: node:18-slim
+    command: bash -c "cd /app && npm install && npm install prom-client && node -e \"console.log('Node version:', process.version); try { require('prom-client'); console.log('prom-client is installed'); } catch(e) { console.log('Error loading prom-client:', e.message); }; console.log('Keeping container alive...'); setInterval(() => {}, 1000);\""
+    volumes:
+      - ./backend/node-service:/app
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://:dev-redis-123@redis:6379/0
+    depends_on:
+      - redis 

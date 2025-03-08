@@ -2,18 +2,62 @@ from flask import Flask
 from flask_cors import CORS
 from flask_migrate import Migrate
 from flask_wtf.csrf import CSRFProtect
-from shared.database import db, init_db
-from shared.middleware.error_handler import handle_api_errors
-from shared.middleware.validation import validate_schema
-from shared.middleware.rate_limiter import RateLimiter
-from shared.config import config
+import sys
+import os
+
+# Add the current directory to the path
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
+
+# Try to import from local shared directory first
+try:
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../shared')))
+    from database import db, init_db
+    from middleware.error_handler import handle_api_errors
+    from middleware.validation import validate_schema
+    from middleware.rate_limiter import RateLimiter
+    from config import config
+    print("Successfully imported shared modules from local shared directory")
+except ImportError as e:
+    print(f"Error importing from local shared: {e}")
+    # Try absolute import path (when PYTHONPATH includes shared)
+    try:
+        from shared.database import db, init_db
+        from shared.middleware.error_handler import handle_api_errors
+        from shared.middleware.validation import validate_schema
+        from shared.middleware.rate_limiter import RateLimiter
+        from shared.config import config
+        print("Successfully imported shared modules using absolute import")
+    except ImportError as e2:
+        print(f"Error importing from absolute path: {e2}")
+        # Fallback to relative path
+        try:
+            sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+            from backend.shared.database import db, init_db
+            from backend.shared.middleware.error_handler import handle_api_errors
+            from backend.shared.middleware.validation import validate_schema
+            from backend.shared.middleware.rate_limiter import RateLimiter
+            from backend.shared.config import config
+            print("Successfully imported shared modules using relative import")
+        except ImportError as e3:
+            print(f"All import methods failed. Last error: {e3}")
+            raise ImportError("Could not import shared modules using any method")
+
 from .routes.meetings import meetings_bp
-from .routes.auth_integration import auth_integration_bp
+from .routes.auth_integration import bp as auth_integration_bp
 from .utils.migrations_manager import MigrationsManager
 from .utils.data_seeder import DataSeeder
-from apscheduler.schedulers.background import BackgroundScheduler
+
+# Try to import APScheduler, but continue if it's not available
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    has_apscheduler = True
+    print("Successfully imported APScheduler")
+except ImportError:
+    has_apscheduler = False
+    print("APScheduler not available, some features will be disabled")
+
 from datetime import datetime, timedelta
-import os
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -107,6 +151,7 @@ def create_app(config_name='development', initialize_db=True):
                 'service': 'flask',
                 'database': 'connected',
                 'redis': 'connected',
+                'apscheduler': 'available' if has_apscheduler else 'unavailable',
                 'timestamp': datetime.utcnow().isoformat()
             }, 200
         except Exception as e:

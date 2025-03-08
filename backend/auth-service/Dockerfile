@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-WORKDIR /app/auth-service
+WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -9,28 +9,24 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
-COPY auth-service/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy shared code
-COPY shared /app/shared/
+# Create necessary directories
+RUN mkdir -p /app/migrations/versions /app/logs /app/src /app/scripts /app/instance
 
-# Copy auth service code
-COPY auth-service .
+# Copy files by directory to avoid permission issues
+COPY src/ /app/src/
+COPY migrations/ /app/migrations/
+COPY scripts/ /app/scripts/
+COPY instance/ /app/instance/
+COPY *.py /app/
+COPY *.ini /app/
 
 # Set environment variables
 ENV FLASK_APP=src.app
 ENV FLASK_DEBUG=1
 ENV PYTHONPATH=/app
-
-# Create necessary directories
-RUN mkdir -p migrations/versions logs
-
-# Copy migration files
-COPY auth-service/migrations/versions/* migrations/versions/
-COPY auth-service/migrations/env.py migrations/
-COPY auth-service/migrations/script.py.mako migrations/
-COPY auth-service/migrations/alembic.ini migrations/
 
 # Expose port
 EXPOSE 5001

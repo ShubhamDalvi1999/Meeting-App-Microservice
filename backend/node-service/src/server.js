@@ -1,115 +1,118 @@
-require('dotenv').config();
+// Initialize environment variables from .env file
+try {
+  require('dotenv').config();
+} catch (error) {
+  console.log('Error loading dotenv, using process.env variables:', error.message);
+}
+
 const express = require('express');
-const { createServer } = require('http');
-const { Server } = require('socket.io');
+const http = require('http');
+const socketIo = require('socket.io');
 const cors = require('cors');
 const Redis = require('ioredis');
 const morgan = require('morgan');
+const winston = require('winston');
 const helmet = require('helmet');
 const compression = require('compression');
 const jwt = require('jsonwebtoken');
-const { logger } = require('./utils/logger');
 const WebRTCSignaling = require('./services/webrtc');
 const ChatService = require('./services/chat');
 const WhiteboardService = require('./services/whiteboard');
 const config = require('./config');
 
-const app = express();
-const server = createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000'],
-    methods: ['GET', 'POST'],
-    credentials: true
-  }
+// Setup logger
+const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
+    new winston.transports.File({ filename: 'logs/combined.log' })
+  ]
 });
 
-// Initialize Redis client
-const redis = new Redis(config.redis.url, config.redis.options);
+// Initialize Express app
+const app = express();
+const server = http.createServer(app);
+
+// Set port
+const PORT = process.env.PORT || 3001;
+
+// Middleware
+app.use(cors());
+app.use(helmet());
+app.use(compression());
+app.use(express.json());
+app.use(morgan('dev'));
+
+// Redis client
+let redisClient;
+try {
+  const redisUrl = process.env.REDIS_URL || 'redis://:dev-redis-123@redis:6379/0';
+  redisClient = new Redis(redisUrl);
+  logger.info('Redis connection established');
+} catch (error) {
+  logger.error(`Redis connection error: ${error.message}`);
+}
+
+// Socket.io setup
+const io = socketIo(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
 
 // Initialize services
 const webrtcService = new WebRTCSignaling(io);
 const chatService = new ChatService(io);
 const whiteboardService = new WhiteboardService(io);
 
-// Middleware
-app.use(cors());
-app.use(helmet());
-app.use(compression());
-app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
-app.use(express.json());
-
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.status(200).json({ status: 'ok' });
 });
 
-// Socket.io middleware for authentication
-io.use(async (socket, next) => {
-  const token = socket.handshake.auth.token;
-  if (!token) {
-    return next(new Error('Authentication token required'));
-  }
-
-  try {
-    // Verify token with Redis
-    const isValid = await redis.get(`token:${token}`);
-    if (!isValid) {
-      return next(new Error('Invalid token'));
-    }
-    next();
-  } catch (error) {
-    logger.error('Socket authentication error:', error);
-    next(new Error('Authentication error'));
-  }
-});
-
-// Socket.io connection handling
+// Socket.io event handlers
 io.on('connection', (socket) => {
-  logger.info(`Client connected: ${socket.id}`);
+  logger.info(`User connected: ${socket.id}`);
 
-  // Join room
-  socket.on('join-room', (roomId) => {
-    socket.join(roomId);
-    logger.info(`Client ${socket.id} joined room ${roomId}`);
-    io.to(roomId).emit('user-connected', { userId: socket.id });
+  socket.on('join-meeting', (meetingId) => {
+    socket.join(meetingId);
+    logger.info(`User ${socket.id} joined meeting ${meetingId}`);
   });
 
-  // Leave room
-  socket.on('leave-room', (roomId) => {
-    socket.leave(roomId);
-    logger.info(`Client ${socket.id} left room ${roomId}`);
-    io.to(roomId).emit('user-disconnected', { userId: socket.id });
+  socket.on('leave-meeting', (meetingId) => {
+    socket.leave(meetingId);
+    logger.info(`User ${socket.id} left meeting ${meetingId}`);
   });
 
-  // WebRTC events
-  socket.on('offer', (data) => webrtcService.handleOffer(socket, data));
-  socket.on('answer', (data) => webrtcService.handleAnswer(socket, data));
-  socket.on('ice-candidate', (data) => webrtcService.handleIceCandidate(socket, data));
+  socket.on('message', (data) => {
+    io.to(data.meetingId).emit('message', data);
+    logger.info(`Message sent in meeting ${data.meetingId} by ${socket.id}`);
+  });
 
-  // Chat events
-  socket.on('send-message', (data) => chatService.handleMessage(socket, data));
-  socket.on('typing', (data) => chatService.handleTyping(socket, data));
-  socket.on('file-share', (data) => chatService.handleFileShare(socket, data));
-  socket.on('message-reaction', (data) => chatService.handleReaction(socket, data));
-
-  // Whiteboard events
-  socket.on('draw', (data) => whiteboardService.handleDraw(socket, data));
-  socket.on('clear', (data) => whiteboardService.handleClear(socket, data));
-  socket.on('undo', (data) => whiteboardService.handleUndo(socket, data));
-  socket.on('redo', (data) => whiteboardService.handleRedo(socket, data));
-
-  // Disconnect handling
   socket.on('disconnect', () => {
-    logger.info(`Client disconnected: ${socket.id}`);
-    webrtcService.handleDisconnect(socket);
-    chatService.handleDisconnect(socket);
-    whiteboardService.handleDisconnect(socket);
+    logger.info(`User disconnected: ${socket.id}`);
   });
 });
 
 // Start server
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, '0.0.0.0', () => {
-  logger.info(`WebSocket server running on port ${PORT}`);
+server.listen(PORT, () => {
+  logger.info(`WebSocket service running on port ${PORT}`);
+});
+
+// Handle graceful shutdown
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    logger.info('HTTP server closed');
+    if (redisClient) {
+      redisClient.quit();
+    }
+    process.exit(0);
+  });
 }); 

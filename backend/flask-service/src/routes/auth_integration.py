@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app
+from functools import wraps
 from ..utils.auth_integration import AuthIntegration
 from shared.middleware.auth import service_auth_required
 from shared.middleware.validation import validate_schema

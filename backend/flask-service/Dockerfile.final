@@ -1,0 +1,83 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    postgresql-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install APScheduler==3.10.4
+
+# Create directories
+RUN mkdir -p /app/shared /app/logs
+
+# Copy service code
+COPY . /app/
+
+# Create entrypoint script
+RUN echo '#!/bin/bash\n\
+\n\
+# Wait for postgres\n\
+echo "Waiting for postgres..."\n\
+while ! pg_isready -h postgres -p 5432 -U $POSTGRES_USER -d $POSTGRES_DB; do\n\
+    echo "Postgres is unavailable - sleeping"\n\
+    sleep 1\n\
+done\n\
+echo "Postgres is up - executing command"\n\
+\n\
+# Print directory structure for debugging\n\
+echo "Directory structure in /app:"\n\
+ls -la /app\n\
+echo "Directory structure in /app/shared:"\n\
+ls -la /app/shared\n\
+echo "Directory structure in /app/src:"\n\
+ls -la /app/src\n\
+\n\
+# Set Python path\n\
+export PYTHONPATH=/app:/app/shared\n\
+\n\
+# Run database migrations\n\
+echo "Running database migrations..."\n\
+cd /app\n\
+flask db upgrade\n\
+\n\
+# Additional check for APScheduler package\n\
+echo "Checking if APScheduler is installed..."\n\
+pip list | grep APScheduler\n\
+\n\
+# Get the shared modules\n\
+if python -c "import shared; print(\"Successfully imported shared modules using absolute import\")"; then\n\
+    echo "Successfully imported shared modules using absolute import"\n\
+else\n\
+    echo "Failed to import shared modules using absolute import"\n\
+fi\n\
+\n\
+# Start the application\n\
+echo "Starting application..."\n\
+exec gunicorn --bind 0.0.0.0:5000 --workers 4 --threads 8 --timeout 0 "src.app:create_app()"\n\
+' > /entrypoint.sh
+
+# Make entrypoint executable
+RUN chmod +x /entrypoint.sh
+
+# Set environment variables
+ENV FLASK_APP=src.app
+ENV FLASK_DEBUG=0
+ENV PYTHONPATH=/app:/app/shared
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:5000/health || exit 1
+
+# Expose port
+EXPOSE 5000
+
+# Set entrypoint
+ENTRYPOINT ["/entrypoint.sh"] 
