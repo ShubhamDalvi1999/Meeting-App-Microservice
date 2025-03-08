@@ -84,7 +84,7 @@ services:
   backend:
     build:
       context: ./backend/flask-service
-      dockerfile: Dockerfile.new
+      dockerfile: Dockerfile.fixed
     volumes:
       - backend_data:/app
       - backend_shared:/app/shared

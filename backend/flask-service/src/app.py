@@ -4,6 +4,8 @@ from flask_migrate import Migrate
 from flask_wtf.csrf import CSRFProtect
 import sys
 import os
+import logging
+from datetime import datetime, timedelta
 
 # Add the current directory to the path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
@@ -57,9 +59,6 @@ except ImportError:
     has_apscheduler = False
     print("APScheduler not available, some features will be disabled")
 
-from datetime import datetime, timedelta
-import logging
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -68,7 +67,15 @@ migrate = Migrate()
 csrf = CSRFProtect()
 rate_limiter = None
 
+# Helper function to get environment variables
+def get_env_var(name, default=None):
+    import os
+    return os.environ.get(name, default)
+
 def create_app(config_name='development', initialize_db=True):
+    # Import os here to ensure it's available in this scope
+    import os
+    
     app = Flask(__name__)
     
     # Ensure required environment variables are set
@@ -80,7 +87,11 @@ def create_app(config_name='development', initialize_db=True):
         'AUTH_SERVICE_URL'
     ]
     
-    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+    missing_vars = []
+    for var in required_env_vars:
+        if not os.environ.get(var):
+            missing_vars.append(var)
+    
     if missing_vars:
         raise RuntimeError(f"Missing required environment variables: {', '.join(missing_vars)}")
     
@@ -88,7 +99,7 @@ def create_app(config_name='development', initialize_db=True):
     app.config.from_object(config[config_name])
     
     # Ensure backup directory is configured
-    app.config['BACKUP_DIR'] = os.getenv('BACKUP_DIR', os.path.join(app.root_path, 'db_backups'))
+    app.config['BACKUP_DIR'] = os.environ.get('BACKUP_DIR', os.path.join(app.root_path, 'db_backups'))
     
     # Initialize rate limiter
     global rate_limiter
@@ -167,4 +178,4 @@ def create_app(config_name='development', initialize_db=True):
 
 if __name__ == '__main__':
     app = create_app()
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000))) 
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000))) 

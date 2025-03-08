@@ -1,0 +1,263 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    postgresql-client \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install APScheduler==3.10.4
+
+# Create directories
+RUN mkdir -p /app/shared /app/logs /app/src /app/routes /app/models /app/migrations
+
+# Copy files by directory to avoid permission issues
+COPY src/ /app/src/
+COPY routes/ /app/routes/
+COPY models/ /app/models/
+COPY migrations/ /app/migrations/
+COPY *.py /app/
+COPY *.sh /app/
+
+# Copy shared module files
+COPY shared/ /app/shared/
+
+# Create a fixed version of app.py
+RUN echo 'from flask import Flask\n\
+from flask_cors import CORS\n\
+from flask_migrate import Migrate\n\
+from flask_wtf.csrf import CSRFProtect\n\
+import sys\n\
+import os\n\
+import logging\n\
+from datetime import datetime, timedelta\n\
+\n\
+# Add the current directory to the path\n\
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))\n\
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))\n\
+\n\
+# Try to import from local shared directory first\n\
+try:\n\
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../shared")))\n\
+    from database import db, init_db\n\
+    from middleware.error_handler import handle_api_errors\n\
+    from middleware.validation import validate_schema\n\
+    from middleware.rate_limiter import RateLimiter\n\
+    from config import config\n\
+    print("Successfully imported shared modules from local shared directory")\n\
+except ImportError as e:\n\
+    print(f"Error importing from local shared: {e}")\n\
+    # Try absolute import path (when PYTHONPATH includes shared)\n\
+    try:\n\
+        from shared.database import db, init_db\n\
+        from shared.middleware.error_handler import handle_api_errors\n\
+        from shared.middleware.validation import validate_schema\n\
+        from shared.middleware.rate_limiter import RateLimiter\n\
+        from shared.config import config\n\
+        print("Successfully imported shared modules using absolute import")\n\
+    except ImportError as e2:\n\
+        print(f"Error importing from absolute path: {e2}")\n\
+        # Fallback to relative path\n\
+        try:\n\
+            sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))\n\
+            from backend.shared.database import db, init_db\n\
+            from backend.shared.middleware.error_handler import handle_api_errors\n\
+            from backend.shared.middleware.validation import validate_schema\n\
+            from backend.shared.middleware.rate_limiter import RateLimiter\n\
+            from backend.shared.config import config\n\
+            print("Successfully imported shared modules using relative import")\n\
+        except ImportError as e3:\n\
+            print(f"All import methods failed. Last error: {e3}")\n\
+            raise ImportError("Could not import shared modules using any method")\n\
+\n\
+from .routes.meetings import meetings_bp\n\
+from .routes.auth_integration import bp as auth_integration_bp\n\
+from .utils.migrations_manager import MigrationsManager\n\
+from .utils.data_seeder import DataSeeder\n\
+\n\
+# Try to import APScheduler, but continue if it is not available\n\
+try:\n\
+    from apscheduler.schedulers.background import BackgroundScheduler\n\
+    has_apscheduler = True\n\
+    print("Successfully imported APScheduler")\n\
+except ImportError:\n\
+    has_apscheduler = False\n\
+    print("APScheduler not available, some features will be disabled")\n\
+\n\
+logging.basicConfig(level=logging.INFO)\n\
+logger = logging.getLogger(__name__)\n\
+\n\
+# Initialize extensions\n\
+migrate = Migrate()\n\
+csrf = CSRFProtect()\n\
+rate_limiter = None\n\
+\n\
+def create_app(config_name="development", initialize_db=True):\n\
+    # Import os here to ensure it is available in this scope\n\
+    import os\n\
+    \n\
+    app = Flask(__name__)\n\
+    \n\
+    # Ensure required environment variables are set\n\
+    required_env_vars = [\n\
+        "DATABASE_URL",\n\
+        "JWT_SECRET_KEY",\n\
+        "REDIS_URL",\n\
+        "SERVICE_KEY",\n\
+        "AUTH_SERVICE_URL"\n\
+    ]\n\
+    \n\
+    missing_vars = []\n\
+    for var in required_env_vars:\n\
+        if not os.environ.get(var):\n\
+            missing_vars.append(var)\n\
+    \n\
+    if missing_vars:\n\
+        raise RuntimeError(f"Missing required environment variables: {", ".join(missing_vars)}")\n\
+    \n\
+    # Load configuration from shared config\n\
+    app.config.from_object(config[config_name])\n\
+    \n\
+    # Ensure backup directory is configured\n\
+    app.config["BACKUP_DIR"] = os.environ.get("BACKUP_DIR", os.path.join(app.root_path, "db_backups"))\n\
+    \n\
+    # Initialize rate limiter\n\
+    global rate_limiter\n\
+    rate_limiter = RateLimiter(app.config["REDIS_URL"])\n\
+    \n\
+    # CORS configuration from shared config\n\
+    CORS(app, resources={\n\
+        r"/api/*": {\n\
+            "origins": app.config["CORS_ORIGINS"],\n\
+            "methods": app.config["CORS_METHODS"],\n\
+            "allow_headers": app.config["CORS_HEADERS"],\n\
+            "supports_credentials": True\n\
+        }\n\
+    })\n\
+    \n\
+    # CSRF configuration\n\
+    csrf.init_app(app)\n\
+    app.config["WTF_CSRF_TIME_LIMIT"] = 3600  # 1 hour\n\
+    app.config["WTF_CSRF_SSL_STRICT"] = True\n\
+    \n\
+    # Exempt non-browser endpoints from CSRF\n\
+    csrf.exempt(auth_integration_bp)\n\
+    \n\
+    # Initialize extensions with app context\n\
+    init_db(app)  # Using shared database initialization\n\
+    migrate.init_app(app, db)\n\
+    \n\
+    # Register error handlers from shared middleware\n\
+    handle_api_errors(app)\n\
+\n\
+    # Initialize database if needed\n\
+    if initialize_db:\n\
+        with app.app_context():\n\
+            migrations_manager = MigrationsManager(app, db)\n\
+            migrations_manager.initialize_database()\n\
+\n\
+            # Seed data in development\n\
+            if app.config["FLASK_ENV"] == "development":\n\
+                data_seeder = DataSeeder(app, db)\n\
+                if not data_seeder.run_all_seeders():\n\
+                    logger.error("Failed to seed data")\n\
+\n\
+    # Register blueprints\n\
+    app.register_blueprint(meetings_bp, url_prefix="/api/meetings")\n\
+    app.register_blueprint(auth_integration_bp, url_prefix="/api")\n\
+\n\
+    @app.route("/health")\n\
+    def health_check():\n\
+        """Health check endpoint with service status"""\n\
+        try:\n\
+            # Check database connection\n\
+            with app.app_context():\n\
+                db.session.execute("SELECT 1")\n\
+            \n\
+            # Check Redis connection\n\
+            rate_limiter.redis.ping()\n\
+            \n\
+            return {\n\
+                "status": "healthy",\n\
+                "service": "flask",\n\
+                "database": "connected",\n\
+                "redis": "connected",\n\
+                "apscheduler": "available" if has_apscheduler else "unavailable",\n\
+                "timestamp": datetime.utcnow().isoformat()\n\
+            }, 200\n\
+        except Exception as e:\n\
+            logger.error(f"Health check failed: {str(e)}")\n\
+            return {\n\
+                "status": "unhealthy",\n\
+                "service": "flask",\n\
+                "error": str(e),\n\
+                "timestamp": datetime.utcnow().isoformat()\n\
+            }, 500\n\
+\n\
+    return app\n\
+\n\
+if __name__ == "__main__":\n\
+    app = create_app()\n\
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))\n\
+' > /app/src/app.py
+
+# Create entrypoint script with Unix line endings
+RUN echo '#!/bin/bash\n\
+\n\
+# Wait for postgres\n\
+echo "Waiting for postgres..."\n\
+while ! pg_isready -h postgres -p 5432 -U $POSTGRES_USER -d $POSTGRES_DB; do\n\
+    echo "Postgres is unavailable - sleeping"\n\
+    sleep 1\n\
+done\n\
+echo "Postgres is up - executing command"\n\
+\n\
+# Print directory structure for debugging\n\
+echo "Directory structure in /app:"\n\
+ls -la /app\n\
+echo "Directory structure in /app/shared:"\n\
+ls -la /app/shared\n\
+echo "Directory structure in /app/src:"\n\
+ls -la /app/src\n\
+\n\
+# Set Python path\n\
+export PYTHONPATH=/app:/app/shared\n\
+\n\
+# Run database migrations\n\
+echo "Running database migrations..."\n\
+cd /app\n\
+flask db upgrade\n\
+\n\
+# Additional check for APScheduler package\n\
+echo "Checking if APScheduler is installed..."\n\
+pip list | grep APScheduler\n\
+\n\
+# Start the application\n\
+echo "Starting application..."\n\
+exec gunicorn --bind 0.0.0.0:5000 --workers 4 --threads 8 --timeout 0 "src.app:create_app()"\n\
+' > /entrypoint.sh
+
+# Make entrypoint executable
+RUN chmod +x /entrypoint.sh
+
+# Set environment variables
+ENV FLASK_APP=src.app
+ENV FLASK_DEBUG=0
+ENV PYTHONPATH=/app:/app/shared
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:5000/health || exit 1
+
+# Expose port
+EXPOSE 5000
+
+# Set entrypoint
+ENTRYPOINT ["/entrypoint.sh"] 
