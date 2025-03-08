@@ -1,173 +1,159 @@
-# Meeting App - WebRTC Based Video Conferencing
+# Meeting Application
 
-A full-stack meeting application built with microservices architecture, featuring video/audio calls, screen sharing, whiteboard, and chat functionality.
+A comprehensive meeting management application with authentication, real-time communication, and calendar integration.
 
-## Features
+## System Architecture
 
-- Video and Audio Calls using WebRTC
-- Screen Sharing
-- Interactive Whiteboard with multiple colors
-- Real-time Chat
-- Multiple user support with meeting codes
-- Containerized microservices architecture with Kubernetes orchestration
+The application is built using a microservices architecture consisting of:
 
-## Tech Stack
-
-- Frontend: Next.js + React + TypeScript
-- Backend Services:
-  - Flask API Service: User management and business logic
-  - Node.js WebSocket Service: Real-time communication
-- Database: PostgreSQL
-- Cache: Redis
-- Containerization: Docker
-- Orchestration: Kubernetes
+- **Frontend**: Next.js application for the user interface
+- **Backend API**: Flask-based API for meeting management
+- **Auth Service**: Flask-based microservice for authentication and user management
+- **WebSocket Service**: Node.js-based WebSocket server for real-time communication
+- **Databases**: PostgreSQL for persistent data storage
+- **Redis**: For caching, pub/sub messaging, and session storage
+- **Monitoring**: Prometheus and Grafana for metrics and monitoring
 
 ## Prerequisites
 
-- Docker Desktop with Kubernetes enabled
-- PowerShell (for Windows)
-- kubectl CLI tool
-- Node.js 18+ (for local development)
-- Python 3.11+ (for local development)
+- Docker and Docker Compose
+- Git
+- Make (optional, for using Makefile)
 
-## Project Structure
+### Windows-Specific Requirements
 
-```
-.
-├── frontend/                 # Next.js frontend application
-├── backend/
-│   ├── flask-service/       # Flask REST API service
-│   └── node-service/        # Node.js WebSocket service
-├── k8s/                     # Kubernetes configuration files
-│   └── config/
-│       └── development/     # Development environment configs
-├── scripts/                 # Deployment and utility scripts
-├── docs/                    # Documentation
-└── README.md
-```
+- Docker Desktop with WSL2 backend recommended
+- PowerShell 5.0 or higher for running scripts
+- Git Bash or WSL2 for bash scripts (optional)
 
-## Deployment
+## Quick Start
 
-### Quick Start
+### Setting Up Environment
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/your-username/meeting-app.git
    cd meeting-app
    ```
 
-2. Run the deployment script (requires administrator privileges for hosts file modification):
-   ```powershell
-   # Open PowerShell as Administrator
-   .\scripts\deploy-meeting-app.ps1
+2. Create a `.env` file by copying the example:
+   ```bash
+   # For Linux/macOS
+   cp .env.example .env
+   
+   # For Windows
+   copy .env.example .env
    ```
 
-3. Access the application:
-   - Frontend: http://meeting-app.local:30000
-   - API: http://api.meeting-app.local:30963
-   - WebSocket: ws://ws.meeting-app.local:30283
+3. Modify the `.env` file with your desired configuration values.
 
-### Manual Deployment Steps
+### Starting the Application
 
-1. Build Docker images:
-   ```powershell
-   docker build -t meeting-app-backend:dev ./backend/flask-service
-   docker build -t meeting-app-websocket:dev ./backend/node-service
-   docker build -t meeting-app-frontend:dev ./frontend
-   ```
+#### Using Scripts (Recommended)
 
-2. Create Kubernetes resources:
-   ```powershell
-   kubectl create namespace meeting-app
-   kubectl apply -f k8s/config/development/volumes.yaml -n meeting-app
-   kubectl apply -f k8s/config/development/configmap.yaml -n meeting-app
-   kubectl apply -f k8s/config/development/secrets.yaml -n meeting-app
-   kubectl apply -f k8s/config/development/postgres.yaml -n meeting-app
-   kubectl apply -f k8s/config/development/redis.yaml -n meeting-app
-   kubectl apply -f k8s/config/development/deployment.yaml -n meeting-app
-   kubectl apply -f k8s/config/development/frontend-deployment.yaml -n meeting-app
-   kubectl apply -f k8s/config/development/network-policies.yaml -n meeting-app
-   kubectl apply -f k8s/config/development/ingress.yaml -n meeting-app
-   ```
+For Windows:
+```powershell
+# Ensure PowerShell execution policy allows running scripts
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
-3. Update hosts file (`C:\Windows\System32\drivers\etc\hosts`):
-   ```
-   127.0.0.1 meeting-app.local
-   127.0.0.1 api.meeting-app.local
-   127.0.0.1 ws.meeting-app.local
-   ```
+# Run the start script
+.\start.ps1
+```
+
+For Linux/macOS:
+```bash
+# Make the script executable
+chmod +x start.sh
+
+# Run the start script
+./start.sh
+```
+
+#### Manual Startup
+
+Start the services in the following order:
+
+```bash
+# 1. Start database services
+docker-compose up -d postgres auth-db redis
+
+# 2. Wait for databases to initialize
+sleep 15
+
+# 3. Start the auth service
+docker-compose up -d auth-service
+
+# 4. Wait for auth service
+sleep 10
+
+# 5. Start the backend service
+docker-compose up -d backend
+
+# 6. Start remaining services
+docker-compose up -d websocket frontend prometheus grafana
+```
+
+### Database Migrations
+
+Run migrations to initialize the database schema:
+
+For Windows:
+```powershell
+.\migrate.ps1 -ForceInit -Upgrade
+```
+
+For Linux/macOS:
+```bash
+chmod +x migrate.sh
+./migrate.sh --force-init --upgrade
+```
+
+## Accessing the Application
+
+Once all services are started, you can access the application at:
+
+- **Frontend**: [http://localhost:3000](http://localhost:3000)
+- **Backend API**: [http://localhost:5000](http://localhost:5000)
+- **Auth Service**: [http://localhost:5001](http://localhost:5001)
+- **WebSocket Service**: [http://localhost:3001](http://localhost:3001)
+- **Prometheus**: [http://localhost:9090](http://localhost:9090)
+- **Grafana**: [http://localhost:3002](http://localhost:3002)
 
 ## Development
 
-### Local Development Setup
+### Rebuilding Services
 
-1. Install dependencies:
-   ```bash
-   # Frontend
-   cd frontend
-   npm install
-
-   # Flask Backend
-   cd backend/flask-service
-   python -m venv venv
-   source venv/bin/activate  # or `venv\Scripts\activate` on Windows
-   pip install -r requirements.txt
-
-   # Node.js Backend
-   cd backend/node-service
-   npm install
-   ```
-
-2. Set up environment variables:
-   - Copy the example environment files
-   - Update the values according to your local setup
-   - For Kubernetes deployment, update the ConfigMap in `k8s/config/development/configmap.yaml`
-
-### Useful Commands
+If you need to rebuild a specific service after code changes:
 
 ```bash
-# Check deployment status
-kubectl get all -n meeting-app
+docker-compose build <service-name>
+docker-compose up -d <service-name>
+```
 
-# View logs
-kubectl logs -n meeting-app <pod-name>
+### Viewing Logs
 
-# Clean up
-kubectl delete namespace meeting-app
+To view logs for a specific service:
 
-# Port forwarding (for local development)
-kubectl port-forward -n meeting-app svc/meeting-frontend-internal 3000:3000
-kubectl port-forward -n meeting-app svc/meeting-backend-internal 5000:5000
+```bash
+docker-compose logs <service-name>
+```
+
+To follow logs in real-time:
+
+```bash
+docker-compose logs -f <service-name>
+```
+
+### Running Tests
+
+```bash
+docker-compose -f docker-compose.test.yml up
 ```
 
 ## Troubleshooting
 
-1. If pods are stuck in `Pending` state:
-   - Check PVC status: `kubectl get pvc -n meeting-app`
-   - Verify storage class: `kubectl get sc`
-   - Check events: `kubectl get events -n meeting-app`
-
-2. If services are not accessible:
-   - Verify NodePort services: `kubectl get svc -n meeting-app`
-   - Check ingress status: `kubectl get ingress -n meeting-app`
-   - Ensure hosts file is updated correctly
-
-## Contributing
-
-1. Create a feature branch
-2. Commit your changes
-3. Push to the branch
-4. Create a Pull Request
+For common issues and solutions, please refer to the [Troubleshooting Guide](TROUBLESHOOTING.md).
 
 ## License
 
-MIT 
-
-## Documentation
-
-For detailed information about the system, please refer to the following documentation:
-
-- [Meeting System Enhancements](docs/meeting_system_enhancements.md) - Details about the latest features and improvements
-- [Database Migrations](docs/database_migrations.md) - Information about database schema changes and migrations
-- [API Documentation](docs/api.md) - Complete API reference
-- [Development Guide](docs/development.md) - Guide for developers 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 

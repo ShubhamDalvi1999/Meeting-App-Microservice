@@ -20,41 +20,22 @@ try:
     from middleware.rate_limiter import RateLimiter
     from config import config
     print("Successfully imported shared modules from local shared directory")
-except ImportError as e:
-    print(f"Error importing from local shared: {e}")
-    # Try absolute import path (when PYTHONPATH includes shared)
-    try:
-        from shared.database import db, init_db
-        from shared.middleware.error_handler import handle_api_errors
-        from shared.middleware.validation import validate_schema
-        from shared.middleware.rate_limiter import RateLimiter
-        from shared.config import config
-        print("Successfully imported shared modules using absolute import")
-    except ImportError as e2:
-        print(f"Error importing from absolute path: {e2}")
-        # Fallback to relative path
-        try:
-            sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-            from backend.shared.database import db, init_db
-            from backend.shared.middleware.error_handler import handle_api_errors
-            from backend.shared.middleware.validation import validate_schema
-            from backend.shared.middleware.rate_limiter import RateLimiter
-            from backend.shared.config import config
-            print("Successfully imported shared modules using relative import")
-        except ImportError as e3:
-            print(f"All import methods failed. Last error: {e3}")
-            raise ImportError("Could not import shared modules using any method")
+except ImportError:
+    # Fall back to parent shared directory
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../shared')))
+    from shared.database import db, init_db
+    from shared.middleware.error_handler import handle_api_errors
+    from shared.middleware.validation import validate_schema
+    from shared.middleware.rate_limiter import RateLimiter
+    from shared.config import config
+    print("Successfully imported shared modules from parent shared directory")
 
-from .routes.meetings import meetings_bp
-from .routes.auth_integration import bp as auth_integration_bp
-from .utils.migrations_manager import MigrationsManager
-from .utils.data_seeder import DataSeeder
-
-# Try to import APScheduler, but continue if it's not available
+# Import APScheduler if available
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.interval import IntervalTrigger
     has_apscheduler = True
-    print("Successfully imported APScheduler")
+    print("APScheduler is available")
 except ImportError:
     has_apscheduler = False
     print("APScheduler not available, some features will be disabled")
@@ -67,10 +48,31 @@ migrate = Migrate()
 csrf = CSRFProtect()
 rate_limiter = None
 
-# Helper function to get environment variables
-def get_env_var(name, default=None):
-    import os
-    return os.environ.get(name, default)
+# Import blueprints
+from .routes.meetings import meetings_bp
+from .routes.auth_integration import bp as auth_integration_bp
+
+# Import database management
+from .utils.migrations_manager import MigrationsManager
+from .utils.data_seeder import DataSeeder
+
+# Initialize Redis client (will be used for caching and rate limiting)
+from redis import Redis
+redis_client = None
+
+def get_redis_client():
+    """Get or create Redis client singleton"""
+    global redis_client
+    if redis_client is None:
+        redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+        try:
+            redis_client = Redis.from_url(redis_url)
+            redis_client.ping()  # Test connection
+            logger.info("Redis connection established successfully")
+        except Exception as e:
+            logger.error(f"Failed to connect to Redis: {str(e)}")
+            redis_client = None
+    return redis_client
 
 def create_app(config_name='development', initialize_db=True):
     # Import os here to ensure it's available in this scope
@@ -104,6 +106,17 @@ def create_app(config_name='development', initialize_db=True):
     # Initialize rate limiter
     global rate_limiter
     rate_limiter = RateLimiter(app.config['REDIS_URL'])
+    
+    # Initialize Redis client and store in app extensions
+    redis = get_redis_client()
+    if redis:
+        app.extensions['redis'] = redis
+    
+    # Configure cache settings
+    app.config['CACHE_TYPE'] = 'redis'
+    app.config['CACHE_DEFAULT_TIMEOUT'] = 300
+    app.config['CACHE_KEY_PREFIX'] = 'flask_cache_'
+    app.config['CACHE_REDIS_URL'] = app.config['REDIS_URL']
     
     # CORS configuration from shared config
     CORS(app, resources={
@@ -146,6 +159,36 @@ def create_app(config_name='development', initialize_db=True):
     app.register_blueprint(meetings_bp, url_prefix='/api/meetings')
     app.register_blueprint(auth_integration_bp, url_prefix='/api')
 
+    # Initialize background tasks if APScheduler is available
+    if has_apscheduler:
+        scheduler = BackgroundScheduler()
+        
+        # Import tasks here to avoid circular imports
+        from .tasks.cleanup import cleanup_expired_meetings
+        from .tasks.metrics import update_system_metrics
+        
+        # Add cleanup job to run every 6 hours
+        scheduler.add_job(
+            func=cleanup_expired_meetings,
+            trigger=IntervalTrigger(hours=6),
+            id='cleanup_meetings',
+            name='Clean up expired meetings',
+            replace_existing=True
+        )
+        
+        # Add metrics collection job to run every 5 minutes
+        scheduler.add_job(
+            func=update_system_metrics,
+            trigger=IntervalTrigger(minutes=5),
+            id='update_metrics',
+            name='Update system metrics',
+            replace_existing=True
+        )
+        
+        # Start the scheduler
+        scheduler.start()
+        logger.info("Background scheduler started with cleanup and metrics jobs")
+
     @app.route('/health')
     def health_check():
         """Health check endpoint with service status"""
@@ -155,13 +198,19 @@ def create_app(config_name='development', initialize_db=True):
                 db.session.execute('SELECT 1')
             
             # Check Redis connection
-            rate_limiter.redis.ping()
+            redis_status = "unavailable"
+            if app.extensions.get('redis'):
+                try:
+                    app.extensions['redis'].ping()
+                    redis_status = "connected"
+                except:
+                    redis_status = "error"
             
             return {
                 'status': 'healthy',
                 'service': 'flask',
                 'database': 'connected',
-                'redis': 'connected',
+                'redis': redis_status,
                 'apscheduler': 'available' if has_apscheduler else 'unavailable',
                 'timestamp': datetime.utcnow().isoformat()
             }, 200

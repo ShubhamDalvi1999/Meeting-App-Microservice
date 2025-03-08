@@ -1,185 +1,185 @@
 # Troubleshooting Guide
 
-## Common Issues and Solutions
+This document outlines common issues you might encounter when setting up or running the Meeting Application and provides solutions for resolving them.
 
-### 1. Docker Issues
+## Table of Contents
 
-#### Services won't start
-```powershell
-# Check Docker status
-docker info
+1. [Docker Issues](#docker-issues)
+2. [Database Issues](#database-issues)
+3. [Service Connectivity Issues](#service-connectivity-issues)
+4. [Authentication Issues](#authentication-issues)
+5. [Frontend Issues](#frontend-issues)
+6. [Windows-Specific Issues](#windows-specific-issues)
 
-# Reset Docker Desktop
-# 1. Right-click Docker Desktop icon
-# 2. Select "Restart"
-# 3. Wait for Docker to fully restart
+## Docker Issues
 
-# Clean up Docker system
-docker system prune -a --volumes
-```
+### Issue: Docker containers fail to build
 
-#### Port conflicts
-```powershell
-# Check which process is using a port (example: 3000)
-netstat -ano | findstr :3000
+**Symptoms:**
+- `docker-compose build` fails with permission errors or "unknown file mode" errors
+- Errors about missing files during build
 
-# Kill process by PID
-taskkill /PID <PID> /F
-```
+**Solutions:**
+- Make sure you're using the correct `.dockerignore` files in each service directory
+- On Windows, use `Dockerfile.fixed` for the backend service
+- On Windows, try using Docker Desktop with WSL2 backend for better compatibility
+- Ensure line endings are consistent (LF, not CRLF) in scripts copied to containers
 
-### 2. Database Issues
+### Issue: Docker containers exit immediately after starting
 
-#### Connection errors
-```powershell
-# Check database logs
-docker-compose logs postgres
-docker-compose logs auth-db
+**Symptoms:**
+- `docker-compose up` shows containers starting but then stopping
+- `docker-compose ps` shows containers in "Exit" state
 
-# Connect to database directly
-docker-compose exec postgres psql -U dev_user -d meetingapp
-docker-compose exec auth-db psql -U postgres -d auth_db
+**Solutions:**
+- Check container logs with `docker-compose logs <service-name>`
+- Verify environment variables are properly set in `.env` file
+- Make sure entrypoint scripts have proper execute permissions
+- Ensure database connectivity (containers may exit if DB connection fails)
 
-# Reset database
-docker-compose down -v
-docker-compose up -d postgres auth-db
-```
+### Issue: Services can't connect to each other
 
-#### Migration issues
-```powershell
-# Run migrations manually for Flask service
-docker-compose exec backend flask db upgrade
+**Symptoms:**
+- Logs show connection refused errors
+- Services can't find each other by hostname
 
-# Run migrations manually for Auth service
-docker-compose exec auth-service flask db upgrade
-```
+**Solutions:**
+- Ensure all services are on the same Docker network
+- Use correct service hostnames (as defined in docker-compose.yml)
+- Verify ports are exposed correctly
+- Check that service dependencies are properly defined in docker-compose.yml
 
-### 3. Redis Issues
+## Database Issues
 
-#### Connection errors
-```powershell
-# Check Redis logs
-docker-compose logs redis
+### Issue: Database migrations fail
 
-# Connect to Redis CLI
-docker-compose exec redis redis-cli -a dev-redis-123
+**Symptoms:**
+- Flask migrations show "Multiple heads" error
+- Services exit with "database not ready" or "database not initialized"
 
-# Clear Redis cache
-docker-compose exec redis redis-cli -a dev-redis-123 FLUSHALL
-```
+**Solutions:**
+- Merge migration heads using `./migrate.ps1 -Merge` or `./migrate.sh --merge`
+- Verify database credentials in `.env` file
+- Check that migrations are properly initialized with `./migrate.ps1 -ForceInit`
+- Ensure PostgreSQL is running and accessible
 
-### 4. Service-Specific Issues
+### Issue: Database connection timeouts
 
-#### Frontend issues
-```powershell
-# Check frontend logs
-docker-compose logs frontend
+**Symptoms:**
+- Services report "database connection timeout"
+- Intermittent database errors
 
-# Rebuild frontend
-docker-compose build frontend
-docker-compose up -d frontend
+**Solutions:**
+- Increase healthcheck timeouts and retries in docker-compose.yml
+- Ensure PostgreSQL has adequate resources
+- Check for network issues between services
+- Verify connection string format in environment variables
 
-# Clear Next.js cache
-docker-compose exec frontend rm -rf .next
-```
+## Service Connectivity Issues
 
-#### Backend API issues
-```powershell
-# Check backend logs
-docker-compose logs backend
+### Issue: Auth service not responding
 
-# Restart backend service
-docker-compose restart backend
+**Symptoms:**
+- Authentication fails
+- Backend logs show auth service connectivity issues
 
-# Check backend health
-curl http://localhost:5000/health
-```
+**Solutions:**
+- Check if auth-service is running with `docker-compose ps`
+- Verify `AUTH_SERVICE_URL` environment variable is set correctly
+- Ensure auth-service is healthy with `curl http://localhost:5001/health`
+- Check auth-service logs with `docker-compose logs auth-service`
 
-#### Auth Service issues
-```powershell
-# Check auth service logs
-docker-compose logs auth-service
+### Issue: Backend API not accessible
 
-# Restart auth service
-docker-compose restart auth-service
+**Symptoms:**
+- Frontend can't connect to backend
+- `curl http://localhost:5000/health` fails
 
-# Check auth service health
-curl http://localhost:5001/health
-```
+**Solutions:**
+- Verify backend service is running with `docker-compose ps`
+- Check backend logs with `docker-compose logs backend`
+- Ensure port 5000 is exposed and not blocked by firewall
+- Verify `NEXT_PUBLIC_API_URL` is set correctly for frontend
 
-#### WebSocket issues
-```powershell
-# Check WebSocket logs
-docker-compose logs websocket
+## Authentication Issues
 
-# Restart WebSocket service
-docker-compose restart websocket
+### Issue: JWT token validation fails
 
-# Check WebSocket health
-curl http://localhost:3001/health
-```
+**Symptoms:**
+- Users get logged out unexpectedly
+- API requests return 401 Unauthorized
 
-### 5. Environment Issues
+**Solutions:**
+- Ensure `JWT_SECRET_KEY` is identical across all services
+- Check token expiration settings
+- Verify clock synchronization between services
+- Make sure `SERVICE_KEY` for inter-service communication is correct
 
-#### Environment variables not loading
-1. Check if `.env` file exists in root directory
-2. Verify file permissions
-3. Ensure no syntax errors in `.env` file
-4. Restart all services after `.env` changes:
-```powershell
-docker-compose down
-docker-compose up -d
-```
+### Issue: User registration fails
 
-### 6. Performance Issues
+**Symptoms:**
+- New users can't register
+- Registration form submits but returns errors
 
-#### High CPU/Memory usage
-```powershell
-# Check resource usage
-docker stats
+**Solutions:**
+- Check auth-service logs
+- Verify email validation settings
+- Ensure database connectivity for auth-service
+- Check for duplicate email prevention logic
 
-# Restart specific high-usage service
-docker-compose restart <service-name>
-```
+## Frontend Issues
 
-### 7. Network Issues
+### Issue: Frontend fails to build
 
-#### Services can't communicate
-```powershell
-# Check Docker network
-docker network ls
-docker network inspect meeting-app_default
+**Symptoms:**
+- `docker-compose build frontend` fails
+- Next.js build errors
 
-# Recreate network
-docker-compose down
-docker network prune
-docker-compose up -d
-```
+**Solutions:**
+- Check for proper Node.js version in frontend Dockerfile
+- Ensure all dependencies are correctly installed
+- Verify proper volume mounts for node_modules
+- Check if `.next` directory has correct permissions
 
-### 8. Development Workflow
+### Issue: Frontend can't connect to backend services
 
-#### Hot reload not working
-1. Verify environment variables:
-   - `WATCHPACK_POLLING=true`
-   - `CHOKIDAR_USEPOLLING=true`
-2. Check volume mounts in `docker-compose.yml`
-3. Restart development containers
+**Symptoms:**
+- API requests fail
+- Console shows CORS errors or connection refused
 
-### 9. Complete Reset
+**Solutions:**
+- Verify environment variables in frontend service:
+  - `NEXT_PUBLIC_API_URL`
+  - `NEXT_PUBLIC_WS_URL`
+  - `NEXT_PUBLIC_AUTH_URL`
+- Ensure CORS is properly configured in backend and auth services
+- Check network connectivity between containers
 
-If all else fails, perform a complete reset:
-```powershell
-# Stop all containers
-docker-compose down
+## Windows-Specific Issues
 
-# Remove all volumes
-docker-compose down -v
+### Issue: File permission errors in Docker
 
-# Clean Docker system
-docker system prune -a --volumes
+**Symptoms:**
+- "unknown file mode" errors
+- Permission denied when copying files
 
-# Rebuild and start fresh
-docker-compose up --build -d
-```
+**Solutions:**
+- Use `.dockerignore` files to exclude problem files/directories
+- Use explicit COPY commands in Dockerfile rather than copying entire directories
+- Set Git to use LF line endings: `git config --global core.autocrlf input`
+- Use Docker Desktop with WSL2 backend
+
+### Issue: Scripts won't execute
+
+**Symptoms:**
+- PowerShell scripts show security errors
+- Bash scripts fail with "bad interpreter"
+
+**Solutions:**
+- For PowerShell: Set execution policy with `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
+- For bash scripts in Windows: Use `bash script.sh` instead of `./script.sh`
+- Ensure scripts have correct line endings (LF for bash scripts)
+- Make sure scripts have executable permission: `chmod +x script.sh` (in WSL or Git Bash)
 
 ## Getting Help
 
