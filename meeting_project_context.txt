@@ -136,8 +136,10 @@
         📄 logger.js
         📄 metrics.js
   📁 shared/
+    📄 __init__.py
     📄 config.py
     📄 database.py
+    📄 errors.py
     📁 discovery/
       📄 README.md
       📄 __init__.py
@@ -148,7 +150,9 @@
       📄 static.py
     📁 logging/
       📄 __init__.py
+      📄 config.py
     📁 middleware/
+      📄 __init__.py
       📄 auth.py
       📄 error_handler.py
       📄 rate_limiter.py
@@ -167,6 +171,7 @@
       📄 file.py
       📄 vault.py
     📁 utils/
+      📄 __init__.py
       📄 data_seeder.py
       📄 database.py
       📄 http.py
@@ -176,6 +181,8 @@
   📄 secrets.production
 📁 frontend/
   📄 .dockerignore
+  📄 .eslintrc.json
+  📄 DEBUGGING.md
   📄 Dockerfile
   📄 next-env.d.ts
   📄 next.config.js
@@ -187,21 +194,26 @@
   📁 public/
   📁 src/
     📁 components/
+      📄 ErrorBoundary.tsx
       📁 layout/
         📄 Layout.tsx
       📁 meeting/
         📄 Chat.tsx
         📄 VideoConference.tsx
         📄 Whiteboard.tsx
+    📁 config/
+      📄 environment.ts
     📁 contexts/
       📄 AuthContext.tsx
       📄 ChatContext.tsx
+      📄 DebugContext.tsx
       📄 WebRTCContext.tsx
       📄 WebSocketContext.tsx
       📄 WhiteboardContext.tsx
     📁 hooks/
     📁 pages/
       📄 _app.tsx
+      📄 _error.tsx
       📄 dashboard.tsx
       📄 forgot-password.tsx
       📄 index.tsx
@@ -216,14 +228,19 @@
         📄 [token].tsx
       📁 verify-email/
         📄 [token].tsx
+    📁 services/
+      📁 api/
+        📄 client.ts
     📁 styles/
       📄 globals.css
     📁 types/
       📄 custom.d.ts
       📄 events.ts
+      📄 globals.d.ts
       📄 jsx.d.ts
       📄 user.ts
     📁 utils/
+      📄 logger.ts
 📁 k8s/
   📄 flask-backend-deployment.yaml
   📄 hpa.yaml
@@ -611,7 +628,111 @@ For common issues and solutions, please refer to the [Troubleshooting Guide](TRO
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+# Backend Architecture Standardization
+
+This document summarizes the standardization changes implemented to improve consistency, reliability, and maintainability across backend services.
+
+## Key Improvements
+
+1. **Standardized Configuration System**
+   - Unified configuration classes across services
+   - Environment-specific configs (development, testing, production)
+   - Service-specific configs (auth, flask, websocket)
+   - Consistent environment variable handling
+
+2. **Unified Logging Framework**
+   - Structured JSON logging with consistent formatting
+   - Request ID and correlation ID tracking in logs
+   - Configurable log levels and outputs
+   - Third-party library log level management
+
+3. **Consistent Middleware Architecture**
+   - Standard middleware interface
+   - Centralized middleware registration
+   - Request ID middleware for request tracking
+   - Fallback mechanisms for backward compatibility
+
+4. **Standardized Error Handling**
+   - Common error classes with consistent responses
+   - Structured error responses with request IDs
+   - Detailed logging of exceptions
+   - Consistent HTTP status codes
+
+5. **HTTP Utilities Standardization**
+   - Request ID propagation in HTTP requests
+   - Retry mechanisms for transient failures
+   - Consistent logging of HTTP requests
+   - Simplified API for common HTTP methods
+
+6. **Import System Improvements**
+   - Fallback mechanisms for backward compatibility
+   - Clear import paths for shared modules
+   - Graceful handling of missing dependencies
+
+7. **Application Factory Standardization**
+   - Consistent initialization across services
+   - Standard health check endpoints
+   - Unified extension registration
+   - Proper error handling during startup
+
+## Project Structure
+
+```
+backend/
+├── shared/                      # Shared modules used across services
+│   ├── __init__.py              # Shared module import helpers
+│   ├── config.py                # Standardized configuration
+│   ├── errors.py                # Common error classes
+│   ├── logging/                 # Logging framework
+│   │   ├── __init__.py          # Logging module exports
+│   │   └── config.py            # Logging configuration
+│   ├── middleware/              # Shared middleware
+│   │   ├── __init__.py          # Middleware registration
+│   │   └── request_id.py        # Request ID middleware
+│   └── utils/                   # Utility functions
+│       ├── __init__.py          # Utils module exports
+│       └── http.py              # HTTP request utilities
+├── auth-service/                # Authentication service
+│   └── src/
+│       ├── app.py               # Main application factory
+│       └── core/                # Core functionality
+└── flask-service/               # Main backend API service
+    └── src/
+        ├── app.py               # Main application factory
+        └── core/                # Core functionality
+```
+
+## Benefits of Standardization
+
+1. **Improved Maintainability**
+   - Consistent patterns make code easier to understand
+   - Reduced duplication across services
+   - Centralized configuration and error handling
+
+2. **Enhanced Reliability**
+   - Robust error handling and logging
+   - Request tracking across services
+   - Proper fallback mechanisms
+
+3. **Better Observability**
+   - Structured logs with request context
+   - Consistent health check endpoints
+   - Detailed error information
+
+4. **Simplified Development**
+   - Standard interfaces for common functionality
+   - Reduced cognitive load for developers
+   - Easier onboarding for new team members
+
+## Next Steps
+
+1. Add comprehensive test coverage for shared modules
+2. Implement distributed tracing with OpenTelemetry
+3. Add centralized metrics collection
+4. Create deployment automation for shared modules
+5. Add comprehensive documentation 
 ```
 
 
@@ -1770,175 +1891,142 @@ def downgrade():
 
 ### FILE: backend\auth-service\src\app.py
 ```
-from flask import Flask, jsonify
-from flask_cors import CORS
-from flask_migrate import Migrate
-from flask_wtf.csrf import CSRFProtect
-from shared.database import db, init_db
-from shared.middleware.error_handler import handle_api_errors
-from shared.middleware.validation import validate_schema
-from shared.middleware.rate_limiter import RateLimiter
-from shared.config import config
-from .routes.auth import auth_bp
-from .utils.migrations_manager import MigrationsManager
-from .utils.data_seeder import DataSeeder
-from apscheduler.schedulers.background import BackgroundScheduler
-from datetime import datetime, timedelta
-from .tasks.cleanup import cleanup_expired_data
+"""
+Main application factory for the Auth Service.
+"""
+
 import os
+import sys
+import logging
+from typing import Optional, Dict, Any
 
-# Import core module for centralized logging and initialization
-from .core import setup_logging, init_app as init_core
+# Configure import paths for shared modules
+shared_module_paths = [
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../backend'))
+]
 
-# Try to import shared modules
+for path in shared_module_paths:
+    if path not in sys.path:
+        sys.path.append(path)
+
+# Import core modules
+from flask import Flask, jsonify, g
+from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+# Try to import from shared modules with fallbacks
 try:
-    from backend.shared.logging import get_logger
-    from backend.shared.middleware.request_id import RequestIdMiddleware, get_request_id
-    SHARED_MODULES_AVAILABLE = True
+    from shared.config import get_config
 except ImportError:
-    SHARED_MODULES_AVAILABLE = False
-    import logging
-    setup_logging()  # Fall back to core logging
-    logging.basicConfig(level=logging.INFO)
-    
-# Get logger
-if SHARED_MODULES_AVAILABLE:
-    logger = get_logger(__name__)
-else:
-    logger = logging.getLogger(__name__)
+    from core.config import get_config
 
-# Initialize extensions
-migrate = Migrate()
-csrf = CSRFProtect()
-rate_limiter = None
-cors = CORS()
+try:
+    from shared.logging import setup_logging
+except ImportError:
+    from core.logging import setup_logging
 
-def create_app(config_name='development', initialize_db=True):
+try:
+    from shared.middleware import register_middleware
+except ImportError:
+    from core.middleware import register_middleware
+
+# Import local modules
+from core import (
+    db, jwt, migrate, mail, limiter, csrf,
+    register_error_handlers, register_cli_commands
+)
+from api.auth import auth_bp
+from api.users import users_bp
+
+# Configure logger
+logger = logging.getLogger(__name__)
+
+def create_app(config_name: Optional[str] = None) -> Flask:
+    """
+    Create and configure the Flask application.
+
+    Args:
+        config_name: Configuration environment name (default: from FLASK_ENV)
+
+    Returns:
+        Configured Flask application
+    """
+    # Create Flask app
     app = Flask(__name__)
     
     # Load configuration
-    app.config.from_object(config[config_name])
+    config_obj = get_config(config_name or os.getenv('FLASK_ENV', 'development'))
+    app.config.from_object(config_obj)
     
-    # Enable debug mode if FLASK_DEBUG is set
-    app.debug = bool(int(os.getenv('FLASK_DEBUG', 0)))
+    # Override database URL from environment if provided
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+        'AUTH_DATABASE_URL', 
+        app.config.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///auth.db')
+    )
     
-    # Override config with environment variables if they exist
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', app.config['SECRET_KEY'])
-    app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', app.config['JWT_SECRET_KEY'])
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', app.config['SQLALCHEMY_DATABASE_URI'])
-    app.config['GOOGLE_CLIENT_ID'] = os.getenv('GOOGLE_CLIENT_ID')
+    # Configure logging
+    setup_logging(
+        app=app, 
+        service_name='auth-service',
+        log_level=app.config.get('LOG_LEVEL', 'INFO')
+    )
     
-    # Service integration configuration
-    app.config['FLASK_SERVICE_URL'] = os.getenv('FLASK_SERVICE_URL', app.config.get('FLASK_SERVICE_URL'))
-    app.config['SERVICE_SYNC_ENABLED'] = os.getenv('SERVICE_SYNC_ENABLED', 'true').lower() == 'true'
+    # Configure proxy settings for running behind a reverse proxy
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
     
-    # Initialize request ID middleware if available
-    if SHARED_MODULES_AVAILABLE:
-        RequestIdMiddleware(app)
-        logger.info("Registered request ID middleware")
+    # Register middleware
+    register_middleware(app)
     
-    # Initialize core functionality
-    init_core(app)
-    
-    # Initialize rate limiter
-    global rate_limiter
-    rate_limiter = RateLimiter(app.config['REDIS_URL'])
-    
-    # CORS configuration
-    cors.init_app(app)
-    
-    # CSRF configuration
-    csrf.init_app(app)
-    app.config['WTF_CSRF_TIME_LIMIT'] = 3600  # 1 hour
-    app.config['WTF_CSRF_SSL_STRICT'] = True
-    
-    # Exempt non-browser endpoints from CSRF
-    csrf.exempt(r'/api/auth/google/*')  # Google OAuth callbacks
-    csrf.exempt(r'/api/auth/verify-email/*')  # Email verification links
-    
-    # Initialize extensions with app context
-    init_db(app)  # Using shared database initialization
+    # Initialize extensions
+    CORS(app)
+    db.init_app(app)
+    jwt.init_app(app)
     migrate.init_app(app, db)
+    mail.init_app(app)
+    limiter.init_app(app)
+    csrf.init_app(app)
     
-    # Register error handlers
-    handle_api_errors(app)  # Using shared error handler
-
-    # Initialize database if needed
-    if initialize_db:
-        with app.app_context():
-            migrations_manager = MigrationsManager(app, db)
-            migrations_manager.initialize_database()
-
-            # Initialize data seeder
-            data_seeder = DataSeeder(app, db)
-            data_seeder.run_all_seeders()
-
+    # Exempt the entire auth blueprint from CSRF protection
+    # This includes OAuth callbacks, token endpoints, etc.
+    csrf.exempt(auth_bp)
+    
     # Register blueprints
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
-
-    # Setup cleanup scheduler
-    if not app.debug and app.config['FLASK_ENV'] == 'production':
-        scheduler = BackgroundScheduler()
-        scheduler.add_job(
-            func=cleanup_expired_data,
-            trigger="interval",
-            hours=1,
-            next_run_time=datetime.now() + timedelta(minutes=5)
-        )
-        scheduler.start()
-
-    # Health check endpoint
+    app.register_blueprint(users_bp, url_prefix='/api/users')
+    
+    # Register error handlers
+    register_error_handlers(app)
+    
+    # Register CLI commands
+    register_cli_commands(app)
+    
+    # Add healthcheck endpoint
     @app.route('/health')
-    def health_check():
-        """Enhanced health check endpoint that provides system information"""
-        import sys
-        import platform
-        from datetime import datetime, timezone
-        from sqlalchemy import text
-        
-        health_info = {
-            'status': 'healthy',
+    def health():
+        """Health check endpoint for the auth service."""
+        health_data = {
+            'status': 'ok',
             'service': 'auth-service',
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'environment': os.environ.get('FLASK_ENV', 'unknown'),
-            'system_info': {
-                'python_version': sys.version,
-                'platform': platform.platform(),
-                'node': platform.node()
-            }
+            'version': os.getenv('VERSION', '0.1.0'),
+            'request_id': getattr(g, 'request_id', 'none')
         }
         
-        # Add request ID if available
-        if SHARED_MODULES_AVAILABLE:
-            request_id = get_request_id()
-            if request_id:
-                health_info['request_id'] = request_id
-        
-        # Basic database check
+        # Add database status check
         try:
-            db.session.execute(text('SELECT 1'))
+            db.session.execute('SELECT 1')
+            health_data['database'] = 'ok'
         except Exception as e:
-            health_info['status'] = 'unhealthy'
-            health_info['error'] = str(e)
-        
-        return jsonify(health_info), 200 if health_info['status'] == 'healthy' else 500
+            health_data['database'] = 'error'
+            health_data['database_error'] = str(e)
+            health_data['status'] = 'degraded'
+            
+        return jsonify(health_data)
     
-    logger.info("Auth service initialized successfully")
+    # Log application startup
+    logger.info(f"Auth service started in {app.config.get('ENV')} mode")
+    
     return app
-
-def init_scheduler(app):
-    """Initialize the background scheduler for cleanup tasks"""
-    if not app.debug and app.config['FLASK_ENV'] == 'production':
-        scheduler = BackgroundScheduler()
-        scheduler.add_job(
-            func=cleanup_expired_data,
-            trigger="interval",
-            hours=1,
-            next_run_time=datetime.now() + timedelta(minutes=5)
-        )
-        scheduler.start()
-        return scheduler
-    return None
 
 if __name__ == '__main__':
     app = create_app()
@@ -2350,130 +2438,173 @@ from flask import jsonify, request, current_app
 
 logger = logging.getLogger(__name__)
 
-# Try to import request ID functionality
+# Try to import standardized errors from shared module
 try:
-    from backend.shared.middleware.request_id import get_request_id
-    HAS_REQUEST_ID = True
+    # Try to import from backend.shared first
+    from backend.shared.errors import (
+        APIError, ValidationError, AuthenticationError, AuthorizationError,
+        UserExistsError, UserNotFoundError, TokenError, ResourceNotFoundError,
+        ResourceExistsError, ServiceError, ConfigurationError, DependencyError,
+        RateLimitError, EmailError, HAS_REQUEST_ID
+    )
+    SHARED_ERRORS_AVAILABLE = True
+    logger.info("Successfully imported shared error classes")
 except ImportError:
-    HAS_REQUEST_ID = False
-
-class APIError(Exception):
-    """Base exception class for API errors with status code and message"""
-    
-    def __init__(self, message, status_code=400, details=None):
-        self.message = message
-        self.status_code = status_code
-        self.details = details or {}
-        self.timestamp = datetime.utcnow().isoformat() + 'Z'
+    try:
+        # Try to import from shared as fallback
+        from shared.errors import (
+            APIError, ValidationError, AuthenticationError, AuthorizationError,
+            UserExistsError, UserNotFoundError, TokenError, ResourceNotFoundError,
+            ResourceExistsError, ServiceError, ConfigurationError, DependencyError,
+            RateLimitError, EmailError, HAS_REQUEST_ID
+        )
+        SHARED_ERRORS_AVAILABLE = True
+        logger.info("Successfully imported shared error classes using fallback path")
+    except ImportError:
+        SHARED_ERRORS_AVAILABLE = False
+        logger.warning("Could not import shared error classes, using local definitions")
         
-        # Add request ID if available
-        if HAS_REQUEST_ID:
-            self.request_id = get_request_id()
-        else:
-            self.request_id = None
-    
-    def to_dict(self):
-        """Convert exception to dictionary representation"""
-        error_dict = {
-            'error': True,
-            'status_code': self.status_code,
-            'message': self.message,
-            'timestamp': self.timestamp
-        }
-        
-        # Include request ID if available
-        if self.request_id:
-            error_dict['request_id'] = self.request_id
-        
-        # Include request URL and method if in a request context
+        # Try to import request ID functionality
         try:
-            error_dict['path'] = request.path
-            error_dict['method'] = request.method
-        except RuntimeError:
-            # Not in a request context
-            pass
-        
-        # Include additional details if provided
-        if self.details:
-            error_dict['details'] = self.details
-        
-        return error_dict
+            from backend.shared.middleware.request_id import get_request_id
+            HAS_REQUEST_ID = True
+        except ImportError:
+            try:
+                from shared.middleware.request_id import get_request_id
+                HAS_REQUEST_ID = True
+            except ImportError:
+                HAS_REQUEST_ID = False
 
+        # Define error classes locally if shared module is not available
+        class APIError(Exception):
+            """Base exception class for API errors with status code and message"""
+            
+            def __init__(self, message, status_code=400, details=None):
+                self.message = message
+                self.status_code = status_code
+                self.details = details or {}
+                self.timestamp = datetime.utcnow().isoformat() + 'Z'
+                
+                # Add request ID if available
+                if HAS_REQUEST_ID:
+                    self.request_id = get_request_id()
+                else:
+                    self.request_id = None
+            
+            def to_dict(self):
+                """Convert exception to dictionary representation"""
+                error_dict = {
+                    'error': True,
+                    'status_code': self.status_code,
+                    'message': self.message,
+                    'timestamp': self.timestamp
+                }
+                
+                # Include request ID if available
+                if hasattr(self, 'request_id') and self.request_id:
+                    error_dict['request_id'] = self.request_id
+                
+                # Include request URL and method if in a request context
+                try:
+                    error_dict['path'] = request.path
+                    error_dict['method'] = request.method
+                except RuntimeError:
+                    # Not in a request context
+                    pass
+                
+                # Include additional details if provided
+                if self.details:
+                    error_dict['details'] = self.details
+                
+                return error_dict
 
-class ValidationError(APIError):
-    """Exception for validation errors"""
-    
-    def __init__(self, message="Validation error", details=None):
-        super().__init__(message=message, status_code=422, details=details)
+        class ValidationError(APIError):
+            """Exception for data validation errors"""
+            
+            def __init__(self, message="Validation error", details=None):
+                super().__init__(message, status_code=422, details=details)
 
+        class AuthenticationError(APIError):
+            """Exception for authentication failures"""
+            
+            def __init__(self, message="Authentication required", details=None):
+                super().__init__(message, status_code=401, details=details)
 
-class AuthenticationError(APIError):
-    """Exception for authentication errors"""
-    
-    def __init__(self, message="Authentication required", details=None):
-        super().__init__(message=message, status_code=401, details=details)
+        class AuthorizationError(APIError):
+            """Exception for authorization failures"""
+            
+            def __init__(self, message="Not authorized", details=None):
+                super().__init__(message, status_code=403, details=details)
 
+        class UserExistsError(APIError):
+            """Exception for duplicate user registration"""
+            
+            def __init__(self, message="User already exists", details=None):
+                super().__init__(message, status_code=409, details=details)
 
-class AuthorizationError(APIError):
-    """Exception for authorization errors"""
-    
-    def __init__(self, message="Not authorized", details=None):
-        super().__init__(message=message, status_code=403, details=details)
+        class UserNotFoundError(APIError):
+            """Exception for user not found"""
+            
+            def __init__(self, message="User not found", details=None):
+                super().__init__(message, status_code=404, details=details)
 
+        class TokenError(APIError):
+            """Exception for token validation failures"""
+            
+            def __init__(self, message="Invalid or expired token", details=None):
+                super().__init__(message, status_code=401, details=details)
 
-class UserExistsError(APIError):
-    """Exception for user already exists errors"""
-    
-    def __init__(self, message="User already exists", details=None):
-        super().__init__(message=message, status_code=409, details=details)
+        class RateLimitError(APIError):
+            """Exception for rate limiting"""
+            
+            def __init__(self, message="Rate limit exceeded", details=None):
+                super().__init__(message, status_code=429, details=details)
 
+        class ServiceError(APIError):
+            """Exception for service failures"""
+            
+            def __init__(self, message="Service error", details=None):
+                super().__init__(message, status_code=500, details=details)
 
-class UserNotFoundError(APIError):
-    """Exception for user not found errors"""
-    
-    def __init__(self, message="User not found", details=None):
-        super().__init__(message=message, status_code=404, details=details)
-        
-
-class TokenError(APIError):
-    """Exception for token errors"""
-    
-    def __init__(self, message="Invalid or expired token", details=None):
-        super().__init__(message=message, status_code=401, details=details)
-
-
-class RateLimitError(APIError):
-    """Exception for rate limiting errors"""
-    
-    def __init__(self, message="Rate limit exceeded", details=None):
-        super().__init__(message=message, status_code=429, details=details)
-
-
-class ServiceError(APIError):
-    """Exception for internal service errors"""
-    
-    def __init__(self, message="Service error", details=None):
-        super().__init__(message=message, status_code=500, details=details)
-
-
-class EmailError(APIError):
-    """Exception for email sending errors"""
-    
-    def __init__(self, message="Failed to send email", details=None):
-        super().__init__(message=message, status_code=500, details=details)
-
+        class EmailError(APIError):
+            """Exception for email sending failures"""
+            
+            def __init__(self, message="Failed to send email", details=None):
+                super().__init__(message, status_code=500, details=details)
+                
+        class ResourceNotFoundError(APIError):
+            """Exception for resource not found"""
+            
+            def __init__(self, message="Resource not found", details=None):
+                super().__init__(message, status_code=404, details=details)
+                
+        class ResourceExistsError(APIError):
+            """Exception for resource already exists"""
+            
+            def __init__(self, message="Resource already exists", details=None):
+                super().__init__(message, status_code=409, details=details)
+                
+        class ConfigurationError(APIError):
+            """Exception for configuration errors"""
+            
+            def __init__(self, message="Configuration error", details=None):
+                super().__init__(message, status_code=500, details=details)
+                
+        class DependencyError(APIError):
+            """Exception for dependency failures"""
+            
+            def __init__(self, message="Dependency error", details=None):
+                super().__init__(message, status_code=503, details=details)
 
 def register_error_handlers(app):
     """
-    Register all error handlers with the Flask application
+    Register all error handlers with the Flask app.
     
     Args:
         app: Flask application instance
     """
-    # Custom API exceptions
+    # Custom exceptions
     app.register_error_handler(APIError, handle_api_error)
-    
-    # Auth-specific exceptions
     app.register_error_handler(ValidationError, handle_api_error)
     app.register_error_handler(AuthenticationError, handle_api_error)
     app.register_error_handler(AuthorizationError, handle_api_error)
@@ -2483,8 +2614,12 @@ def register_error_handlers(app):
     app.register_error_handler(RateLimitError, handle_api_error)
     app.register_error_handler(ServiceError, handle_api_error)
     app.register_error_handler(EmailError, handle_api_error)
+    app.register_error_handler(ResourceNotFoundError, handle_api_error)
+    app.register_error_handler(ResourceExistsError, handle_api_error)
+    app.register_error_handler(ConfigurationError, handle_api_error)
+    app.register_error_handler(DependencyError, handle_api_error)
     
-    # Standard HTTP exceptions
+    # Standard HTTP errors
     app.register_error_handler(400, handle_bad_request)
     app.register_error_handler(401, handle_unauthorized)
     app.register_error_handler(403, handle_forbidden)
@@ -2494,14 +2629,21 @@ def register_error_handlers(app):
     app.register_error_handler(429, handle_rate_limit_exceeded)
     app.register_error_handler(500, handle_server_error)
     
-    # Catch-all handler for all other exceptions
+    # Catch-all for any other exceptions
     app.register_error_handler(Exception, handle_exception)
     
-    logger.info("Registered error handlers for auth service")
-
+    logger.info("Registered error handlers")
 
 def handle_api_error(error):
-    """Handle custom API exceptions"""
+    """
+    Handler for API errors.
+    
+    Args:
+        error: APIError instance
+        
+    Returns:
+        JSON response with error details
+    """
     response = jsonify(error.to_dict())
     response.status_code = error.status_code
     
@@ -2517,39 +2659,81 @@ def handle_api_error(error):
     
     return response
 
-
 def handle_bad_request(error):
-    """Handle 400 Bad Request errors"""
+    """
+    Handler for 400 Bad Request errors.
+    
+    Args:
+        error: Error instance
+        
+    Returns:
+        JSON response with error details
+    """
     api_error = APIError("Bad request", status_code=400)
     return handle_api_error(api_error)
 
-
 def handle_unauthorized(error):
-    """Handle 401 Unauthorized errors"""
+    """
+    Handler for 401 Unauthorized errors.
+    
+    Args:
+        error: Error instance
+        
+    Returns:
+        JSON response with error details
+    """
     api_error = AuthenticationError("Authentication required")
     return handle_api_error(api_error)
 
-
 def handle_forbidden(error):
-    """Handle 403 Forbidden errors"""
+    """
+    Handler for 403 Forbidden errors.
+    
+    Args:
+        error: Error instance
+        
+    Returns:
+        JSON response with error details
+    """
     api_error = AuthorizationError("Access forbidden")
     return handle_api_error(api_error)
 
-
 def handle_not_found(error):
-    """Handle 404 Not Found errors"""
-    api_error = APIError("Resource not found", status_code=404)
+    """
+    Handler for 404 Not Found errors.
+    
+    Args:
+        error: Error instance
+        
+    Returns:
+        JSON response with error details
+    """
+    api_error = ResourceNotFoundError("Resource not found")
     return handle_api_error(api_error)
 
-
 def handle_method_not_allowed(error):
-    """Handle 405 Method Not Allowed errors"""
+    """
+    Handler for 405 Method Not Allowed errors.
+    
+    Args:
+        error: Error instance
+        
+    Returns:
+        JSON response with error details
+    """
     api_error = APIError("Method not allowed", status_code=405)
     return handle_api_error(api_error)
 
-
 def handle_unprocessable_entity(error):
-    """Handle 422 Unprocessable Entity errors"""
+    """
+    Handler for 422 Unprocessable Entity errors.
+    
+    Args:
+        error: Error instance
+        
+    Returns:
+        JSON response with error details
+    """
     # Extract validation errors from WTForms if available
     details = {}
     if hasattr(error, 'data') and 'errors' in error.data:
@@ -2558,16 +2742,30 @@ def handle_unprocessable_entity(error):
     api_error = ValidationError("Validation error", details=details)
     return handle_api_error(api_error)
 
-
 def handle_rate_limit_exceeded(error):
-    """Handle 429 Too Many Requests errors"""
+    """
+    Handler for 429 Too Many Requests errors.
+    
+    Args:
+        error: Error instance
+        
+    Returns:
+        JSON response with error details
+    """
     api_error = RateLimitError("Rate limit exceeded")
     return handle_api_error(api_error)
 
-
 def handle_server_error(error):
-    """Handle 500 Internal Server Error"""
-    # Log detailed error for server-side issues
+    """
+    Handler for 500 Internal Server Error errors.
+    
+    Args:
+        error: Error instance
+        
+    Returns:
+        JSON response with error details
+    """
+    # Log the full stack trace
     logger.error(f"Server error: {str(error)}", exc_info=True)
     
     # Create a more detailed error in development
@@ -2583,10 +2781,18 @@ def handle_server_error(error):
     api_error = ServiceError("Internal server error", details=details)
     return handle_api_error(api_error)
 
-
 def handle_exception(error):
-    """Catch-all exception handler"""
-    logger.error(f"Unhandled exception in auth service: {str(error)}", exc_info=True)
+    """
+    Catch-all handler for uncaught exceptions.
+    
+    Args:
+        error: Exception instance
+        
+    Returns:
+        JSON response with error details
+    """
+    # Log the full stack trace
+    logger.error(f"Uncaught exception: {str(error)}", exc_info=True)
     
     # Create a more detailed error in development
     is_development = current_app.config.get('ENV') == 'development'
@@ -6895,336 +7101,148 @@ logger.info("Application initialized successfully")
 ### FILE: backend\flask-service\src\app.py
 ```
 """
-Flask application factory module.
-Responsible for creating and configuring the Flask application.
+Main application factory for the Flask Backend Service.
 """
 
 import os
 import sys
-import importlib
 import logging
-from datetime import datetime, timedelta
-from flask import Flask, jsonify, request
+from typing import Optional, Dict, Any
 
-# Configure logging and core initialization
-from src.core import setup_logging, init_app as init_core
-logger = setup_logging()
-
-# Try to import shared modules
-try:
-    from backend.shared.logging import get_logger
-    from backend.shared.middleware.request_id import RequestIdMiddleware, get_request_id
-    HAS_REQUEST_ID = True
-    logger = get_logger(__name__)
-except ImportError:
-    HAS_REQUEST_ID = False
-    logger = logging.getLogger(__name__)
-
-# Add shared module paths to sys.path if not already present
-potential_paths = [
-    '/app',
-    '/app/shared',
-    os.path.abspath(os.path.dirname(__file__)),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), '../')),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')),
+# Configure import paths for shared modules
+shared_module_paths = [
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../backend'))
 ]
 
-for path in potential_paths:
+for path in shared_module_paths:
     if path not in sys.path:
         sys.path.append(path)
-        logger.debug(f"Added {path} to sys.path")
 
 # Import core modules
-try:
-    # First try from src.core
-    logger.info("Importing core modules...")
-    from src.core.config import get_config
-    from src.core.errors import register_error_handlers, ServiceError, ConfigurationError
-    from src.core.health import health_bp
-    logger.info("Successfully imported core modules")
-except ImportError as e:
-    logger.error(f"Error importing core modules: {e}")
-    # We'll handle this in create_app
+from flask import Flask, jsonify, g
+from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 
-# Import shared modules
+# Try to import from shared modules with fallbacks
 try:
-    logger.info("Importing shared modules...")
-    # Try different import patterns for flexibility
-    try:
-        # Absolute import
-        from shared.database import db, init_db
-        from shared.middleware.error_handler import handle_api_errors
-        from shared.middleware.validation import validate_schema
-        from shared.middleware.rate_limiter import RateLimiter
-        from shared.config import config
-        logger.info("Successfully imported shared modules using absolute import")
-    except ImportError as e:
-        logger.warning(f"Absolute import failed: {e}, trying relative import")
-        # Fallback to relative import
-        from backend.shared.database import db, init_db
-        from backend.shared.middleware.error_handler import handle_api_errors
-        from backend.shared.middleware.validation import validate_schema
-        from backend.shared.middleware.rate_limiter import RateLimiter
-        from backend.shared.config import config
-        logger.info("Successfully imported shared modules using relative import")
-except ImportError as e:
-    logger.error(f"Error importing shared modules: {e}")
-    # We'll handle this in create_app
+    from shared.config import get_config
+except ImportError:
+    from core.config import get_config
+
+try:
+    from shared.logging import setup_logging
+except ImportError:
+    from core.logging import setup_logging
+
+try:
+    from shared.middleware import register_middleware
+except ImportError:
+    from core.middleware import register_middleware
 
 # Import local modules
-try:
-    logger.info("Importing local modules...")
-    from .routes.meetings import meetings_bp
-    from .routes.auth_integration import bp as auth_integration_bp
-    from .utils.migrations_manager import MigrationsManager
-    from .utils.data_seeder import DataSeeder
-    from .utils.auth_integration import AuthIntegration
-    logger.info("Successfully imported local modules")
-except ImportError as e:
-    logger.error(f"Error importing local modules: {e}")
-    # We'll handle this in create_app
+from core import (
+    db, jwt, migrate, limiter, csrf,
+    register_error_handlers, register_cli_commands
+)
 
-# Extensions
-from flask_cors import CORS
-from flask_migrate import Migrate
-from flask_wtf.csrf import CSRFProtect
-from redis import Redis
+# Import API modules
+from api.meetings import meetings_bp
+from api.participants import participants_bp
+from api.agendas import agendas_bp
+from api.actions import actions_bp
+from api.notes import notes_bp
 
-# Initialize extensions
-migrate = Migrate()
-csrf = CSRFProtect()
-rate_limiter = None
-cors = CORS()
-redis_client = None
+# Configure logger
+logger = logging.getLogger(__name__)
 
-def get_redis_client():
+def create_app(config_name: Optional[str] = None) -> Flask:
     """
-    Get or create Redis client singleton
-    
-    Returns:
-        Redis client instance or None if connection failed
-    """
-    global redis_client
-    logger.debug("get_redis_client called")
-    
-    if redis_client is None:
-        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-        logger.info(f"Initializing Redis client with URL: {redis_url.replace('redis://:', 'redis://***:')}")
-        
-        try:
-            redis_client = Redis.from_url(redis_url)
-            redis_client.ping()  # Test connection
-            logger.info("Redis connection established successfully")
-        except Exception as e:
-            logger.error(f"Failed to connect to Redis: {str(e)}")
-            redis_client = None
-            
-    return redis_client
+    Create and configure the Flask application.
 
-def create_app(config_name='development', initialize_db=True):
-    """
-    Create and configure the Flask application
-    
     Args:
-        config_name: Configuration environment name (development, testing, production)
-        initialize_db: Whether to initialize database and run migrations
-        
+        config_name: Configuration environment name (default: from FLASK_ENV)
+
     Returns:
         Configured Flask application
     """
-    logger.info(f"Creating Flask application with config_name={config_name}")
+    # Create Flask app
+    app = Flask(__name__)
     
-    try:
-        # Create Flask app instance
-        app = Flask(__name__)
-        
-        # Check for import errors
-        import_errors = []
-        required_modules = {
-            'get_config': get_config if 'get_config' in globals() else None,
-            'db': db if 'db' in globals() else None,
-            'meetings_bp': meetings_bp if 'meetings_bp' in globals() else None,
-            'register_error_handlers': register_error_handlers if 'register_error_handlers' in globals() else None
+    # Load configuration
+    config_obj = get_config(config_name or os.getenv('FLASK_ENV', 'development'))
+    app.config.from_object(config_obj)
+    
+    # Override database URL from environment if provided
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+        'BACKEND_DATABASE_URL', 
+        app.config.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///backend.db')
+    )
+    
+    # Configure logging
+    setup_logging(
+        app=app, 
+        service_name='backend-service',
+        log_level=app.config.get('LOG_LEVEL', 'INFO')
+    )
+    
+    # Configure proxy settings for running behind a reverse proxy
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
+    
+    # Register middleware
+    register_middleware(app)
+    
+    # Initialize extensions
+    CORS(app)
+    db.init_app(app)
+    jwt.init_app(app)
+    migrate.init_app(app, db)
+    limiter.init_app(app)
+    csrf.init_app(app)
+    
+    # Register blueprints
+    app.register_blueprint(meetings_bp, url_prefix='/api/meetings')
+    app.register_blueprint(participants_bp, url_prefix='/api/participants')
+    app.register_blueprint(agendas_bp, url_prefix='/api/agendas')
+    app.register_blueprint(actions_bp, url_prefix='/api/actions')
+    app.register_blueprint(notes_bp, url_prefix='/api/notes')
+    
+    # Register error handlers
+    register_error_handlers(app)
+    
+    # Register CLI commands
+    register_cli_commands(app)
+    
+    # Add healthcheck endpoint
+    @app.route('/health')
+    def health():
+        """Health check endpoint for the backend service."""
+        health_data = {
+            'status': 'ok',
+            'service': 'backend-service',
+            'version': os.getenv('VERSION', '0.1.0'),
+            'request_id': getattr(g, 'request_id', 'none')
         }
         
-        missing_modules = [name for name, module in required_modules.items() if module is None]
-        if missing_modules:
-            for module in missing_modules:
-                import_errors.append(f"Required module '{module}' not imported")
-            
-            logger.error(f"Critical import errors: {import_errors}")
-            
-            # Return minimal app with error routes
-            @app.route('/')
-            def import_error():
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Application failed to start due to import errors',
-                    'errors': import_errors,
-                    'python_path': sys.path
-                }), 500
-                
-            @app.route('/health')
-            def minimal_health():
-                response_data = {
-                    'status': 'error',
-                    'message': 'Application is running but with import errors',
-                    'errors': import_errors,
-                    'timestamp': datetime.utcnow().isoformat(),
-                }
-                
-                # Add request ID if available
-                if HAS_REQUEST_ID:
-                    request_id = get_request_id()
-                    if request_id:
-                        response_data['request_id'] = request_id
-                
-                return jsonify(response_data), 500
-                
-            return app
-        
-        # Load configuration
+        # Add database status check
         try:
-            app_config = get_config(config_name)
-            app.config.from_object(app_config)
-            logger.info(f"Loaded configuration: {config_name}")
+            db.session.execute('SELECT 1')
+            health_data['database'] = 'ok'
         except Exception as e:
-            logger.error(f"Error loading configuration: {e}")
-            raise ConfigurationError(f"Failed to load configuration: {str(e)}")
-        
-        # Initialize core functionality
-        init_core(app)
-        
-        # Check environment variables
-        required_env_vars = [
-            'DATABASE_URL',
-            'JWT_SECRET_KEY',
-            'REDIS_URL',
-            'SERVICE_KEY',
-            'AUTH_SERVICE_URL'
-        ]
-        
-        missing_vars = []
-        for var in required_env_vars:
-            if not os.environ.get(var):
-                missing_vars.append(var)
-                logger.error(f"Required environment variable not set: {var}")
-                
-        if missing_vars:
-            error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
-            logger.error(error_msg)
-            raise ConfigurationError(error_msg)
-        
-        # Initialize extensions
-        
-        # CORS configuration
-        logger.info("Configuring CORS...")
-        CORS(app, resources={
-            r"/api/*": {
-                "origins": app.config.get('CORS_ORIGINS', "http://localhost:3000").split(","),
-                "methods": app.config.get('CORS_METHODS', ["GET", "POST", "PUT", "DELETE", "OPTIONS"]),
-                "allow_headers": app.config.get('CORS_HEADERS', ["Content-Type", "Authorization"]),
-                "supports_credentials": True
-            }
-        })
-        
-        # CSRF protection
-        logger.info("Configuring CSRF protection...")
-        csrf.init_app(app)
-        app.config['WTF_CSRF_TIME_LIMIT'] = 3600  # 1 hour
-        app.config['WTF_CSRF_SSL_STRICT'] = app.config.get('WTF_CSRF_SSL_STRICT', True)
-        
-        # Initialize Redis
-        logger.info("Initializing Redis...")
-        redis = get_redis_client()
-        if redis:
-            app.extensions['redis'] = redis
+            health_data['database'] = 'error'
+            health_data['database_error'] = str(e)
+            health_data['status'] = 'degraded'
             
-            # Initialize rate limiter if Redis is available
-            logger.info("Initializing rate limiter...")
-            global rate_limiter
-            rate_limiter = RateLimiter(app.config.get('REDIS_URL'))
-        else:
-            logger.warning("Redis initialization failed, some features may be unavailable")
-        
-        # Initialize request ID middleware if not done already by core
-        if HAS_REQUEST_ID and not hasattr(app, 'request_id'):
-            logger.info("Initializing request ID middleware...")
-            RequestIdMiddleware(app)
-        
-        # Register error handlers
-        if 'register_error_handlers' in globals():
-            logger.info("Registering error handlers...")
-            register_error_handlers(app)
-        else:
-            logger.warning("Error handlers module not available, using basic error handling")
-            # Register basic error handler
-            @app.errorhandler(Exception)
-            def handle_error(error):
-                logger.error(f"Unhandled exception: {str(error)}")
-                response_data = {
-                    'error': True,
-                    'message': 'An unexpected error occurred',
-                    'status_code': 500,
-                    'timestamp': datetime.utcnow().isoformat()
-                }
-                
-                # Add request ID if available
-                if HAS_REQUEST_ID:
-                    request_id = get_request_id()
-                    if request_id:
-                        response_data['request_id'] = request_id
-                
-                response = jsonify(response_data)
-                return response, 500
-        
-        # Initialize database
-        logger.info("Initializing database...")
-        init_db(app)
-        
-        # Initialize migrations
-        logger.info("Initializing migrations...")
-        migrate.init_app(app, db)
-        
-        # Initialize database if needed
-        if initialize_db:
-            with app.app_context():
-                migrations_manager = MigrationsManager(app, db)
-                migrations_manager.initialize_database()
-                
-                # Seed data if needed
-                data_seeder = DataSeeder(app, db)
-                data_seeder.seed_default_data()
-        
-        # Register blueprints
-        logger.info("Registering blueprints...")
-        app.register_blueprint(meetings_bp, url_prefix='/api/meetings')
-        app.register_blueprint(auth_integration_bp, url_prefix='/api/auth')
-        app.register_blueprint(health_bp)
-        
-        # Initialize auth integration
-        logger.info("Initializing auth integration...")
-        AuthIntegration.init_app(app)
-        
-        # Add request ID to response if available
-        @app.after_request
-        def add_request_id_header(response):
-            if HAS_REQUEST_ID:
-                request_id = get_request_id()
-                if request_id:
-                    response.headers['X-Request-ID'] = request_id
-            return response
-        
-        logger.info("Application initialization complete")
-        return app
-        
-    except Exception as e:
-        logger.error(f"Failed to create application: {e}", exc_info=True)
-        raise
+        return jsonify(health_data)
+    
+    # Log application startup
+    logger.info(f"Backend service started in {app.config.get('ENV')} mode")
+    
+    return app
 
 if __name__ == '__main__':
     app = create_app()
-    app.run(host='0.0.0.0', port=5000) 
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=app.config.get('DEBUG', False)) 
 ```
 
 
@@ -7846,108 +7864,163 @@ from flask import jsonify, request, current_app
 
 logger = logging.getLogger(__name__)
 
-# Try to import request ID functionality
+# Try to import standardized errors from shared module
 try:
-    from backend.shared.middleware.request_id import get_request_id
-    HAS_REQUEST_ID = True
+    # Try to import from backend.shared first
+    from backend.shared.errors import (
+        APIError, ValidationError, AuthenticationError, AuthorizationError,
+        UserExistsError, UserNotFoundError, TokenError, ResourceNotFoundError,
+        ResourceExistsError, ServiceError, ConfigurationError, DependencyError,
+        RateLimitError, EmailError, HAS_REQUEST_ID
+    )
+    SHARED_ERRORS_AVAILABLE = True
+    logger.info("Successfully imported shared error classes")
 except ImportError:
-    HAS_REQUEST_ID = False
-
-class APIError(Exception):
-    """Base exception class for API errors with status code and message"""
-    
-    def __init__(self, message, status_code=400, details=None):
-        self.message = message
-        self.status_code = status_code
-        self.details = details or {}
-        self.timestamp = datetime.utcnow().isoformat() + 'Z'
+    try:
+        # Try to import from shared as fallback
+        from shared.errors import (
+            APIError, ValidationError, AuthenticationError, AuthorizationError,
+            UserExistsError, UserNotFoundError, TokenError, ResourceNotFoundError,
+            ResourceExistsError, ServiceError, ConfigurationError, DependencyError,
+            RateLimitError, EmailError, HAS_REQUEST_ID
+        )
+        SHARED_ERRORS_AVAILABLE = True
+        logger.info("Successfully imported shared error classes using fallback path")
+    except ImportError:
+        SHARED_ERRORS_AVAILABLE = False
+        logger.warning("Could not import shared error classes, using local definitions")
         
-        # Add request ID if available
-        if HAS_REQUEST_ID:
-            self.request_id = get_request_id()
-        else:
-            self.request_id = None
-    
-    def to_dict(self):
-        """Convert exception to dictionary representation"""
-        error_dict = {
-            'error': True,
-            'status_code': self.status_code,
-            'message': self.message,
-            'timestamp': self.timestamp
-        }
-        
-        # Include request ID if available
-        if self.request_id:
-            error_dict['request_id'] = self.request_id
-        
-        # Include request URL and method if in a request context
+        # Try to import request ID functionality
         try:
-            error_dict['path'] = request.path
-            error_dict['method'] = request.method
-        except RuntimeError:
-            # Not in a request context
-            pass
-        
-        # Include additional details if provided
-        if self.details:
-            error_dict['details'] = self.details
-        
-        return error_dict
+            from backend.shared.middleware.request_id import get_request_id
+            HAS_REQUEST_ID = True
+        except ImportError:
+            try:
+                from shared.middleware.request_id import get_request_id
+                HAS_REQUEST_ID = True
+            except ImportError:
+                HAS_REQUEST_ID = False
 
-class ValidationError(APIError):
-    """Exception for data validation errors"""
-    
-    def __init__(self, message="Validation error", details=None):
-        super().__init__(message, status_code=422, details=details)
+        # Define error classes locally if shared module is not available
+        class APIError(Exception):
+            """Base exception class for API errors with status code and message"""
+            
+            def __init__(self, message, status_code=400, details=None):
+                self.message = message
+                self.status_code = status_code
+                self.details = details or {}
+                self.timestamp = datetime.utcnow().isoformat() + 'Z'
+                
+                # Add request ID if available
+                if HAS_REQUEST_ID:
+                    self.request_id = get_request_id()
+                else:
+                    self.request_id = None
+            
+            def to_dict(self):
+                """Convert exception to dictionary representation"""
+                error_dict = {
+                    'error': True,
+                    'status_code': self.status_code,
+                    'message': self.message,
+                    'timestamp': self.timestamp
+                }
+                
+                # Include request ID if available
+                if hasattr(self, 'request_id') and self.request_id:
+                    error_dict['request_id'] = self.request_id
+                
+                # Include request URL and method if in a request context
+                try:
+                    error_dict['path'] = request.path
+                    error_dict['method'] = request.method
+                except RuntimeError:
+                    # Not in a request context
+                    pass
+                
+                # Include additional details if provided
+                if self.details:
+                    error_dict['details'] = self.details
+                
+                return error_dict
 
-class AuthenticationError(APIError):
-    """Exception for authentication failures"""
-    
-    def __init__(self, message="Authentication required", details=None):
-        super().__init__(message, status_code=401, details=details)
+        class ValidationError(APIError):
+            """Exception for data validation errors"""
+            
+            def __init__(self, message="Validation error", details=None):
+                super().__init__(message, status_code=422, details=details)
 
-class AuthorizationError(APIError):
-    """Exception for authorization failures"""
-    
-    def __init__(self, message="Not authorized", details=None):
-        super().__init__(message, status_code=403, details=details)
+        class AuthenticationError(APIError):
+            """Exception for authentication failures"""
+            
+            def __init__(self, message="Authentication required", details=None):
+                super().__init__(message, status_code=401, details=details)
 
-class ResourceNotFoundError(APIError):
-    """Exception for resource not found"""
-    
-    def __init__(self, message="Resource not found", details=None):
-        super().__init__(message, status_code=404, details=details)
+        class AuthorizationError(APIError):
+            """Exception for authorization failures"""
+            
+            def __init__(self, message="Not authorized", details=None):
+                super().__init__(message, status_code=403, details=details)
 
-class ResourceExistsError(APIError):
-    """Exception for duplicate resource"""
-    
-    def __init__(self, message="Resource already exists", details=None):
-        super().__init__(message, status_code=409, details=details)
+        class ResourceNotFoundError(APIError):
+            """Exception for resource not found"""
+            
+            def __init__(self, message="Resource not found", details=None):
+                super().__init__(message, status_code=404, details=details)
 
-class RateLimitError(APIError):
-    """Exception for rate limiting"""
-    
-    def __init__(self, message="Rate limit exceeded", details=None):
-        super().__init__(message, status_code=429, details=details)
+        class ResourceExistsError(APIError):
+            """Exception for duplicate resource"""
+            
+            def __init__(self, message="Resource already exists", details=None):
+                super().__init__(message, status_code=409, details=details)
 
-class ServiceError(APIError):
-    """Exception for service failures"""
-    
-    def __init__(self, message="Service error", details=None):
-        super().__init__(message, status_code=500, details=details)
+        class RateLimitError(APIError):
+            """Exception for rate limiting"""
+            
+            def __init__(self, message="Rate limit exceeded", details=None):
+                super().__init__(message, status_code=429, details=details)
 
-class ConfigurationError(APIError):
-    """Exception for configuration errors"""
-    
-    def __init__(self, message="Configuration error", details=None):
-        super().__init__(message, status_code=500, details=details)
+        class ServiceError(APIError):
+            """Exception for service failures"""
+            
+            def __init__(self, message="Service error", details=None):
+                super().__init__(message, status_code=500, details=details)
 
-class DependencyError(APIError):
-    """Exception for dependency failures"""
-    
-    def __init__(self, message="Dependency error", details=None):
-        super().__init__(message, status_code=503, details=details)
+        class ConfigurationError(APIError):
+            """Exception for configuration errors"""
+            
+            def __init__(self, message="Configuration error", details=None):
+                super().__init__(message, status_code=500, details=details)
+
+        class DependencyError(APIError):
+            """Exception for dependency failures"""
+            
+            def __init__(self, message="Dependency error", details=None):
+                super().__init__(message, status_code=503, details=details)
+                
+        class UserExistsError(APIError):
+            """Exception for duplicate user registration"""
+            
+            def __init__(self, message="User already exists", details=None):
+                super().__init__(message, status_code=409, details=details)
+                
+        class UserNotFoundError(APIError):
+            """Exception for user not found"""
+            
+            def __init__(self, message="User not found", details=None):
+                super().__init__(message, status_code=404, details=details)
+                
+        class TokenError(APIError):
+            """Exception for token validation failures"""
+            
+            def __init__(self, message="Invalid or expired token", details=None):
+                super().__init__(message, status_code=401, details=details)
+                
+        class EmailError(APIError):
+            """Exception for email sending failures"""
+            
+            def __init__(self, message="Failed to send email", details=None):
+                super().__init__(message, status_code=500, details=details)
 
 def register_error_handlers(app):
     """
@@ -7967,6 +8040,10 @@ def register_error_handlers(app):
     app.register_error_handler(ServiceError, handle_api_error)
     app.register_error_handler(ConfigurationError, handle_api_error)
     app.register_error_handler(DependencyError, handle_api_error)
+    app.register_error_handler(UserExistsError, handle_api_error)
+    app.register_error_handler(UserNotFoundError, handle_api_error)
+    app.register_error_handler(TokenError, handle_api_error)
+    app.register_error_handler(EmailError, handle_api_error)
     
     # Standard HTTP errors
     app.register_error_handler(400, handle_bad_request)
@@ -17998,93 +18075,303 @@ module.exports = {
 ```
 
 
+### FILE: backend\shared\__init__.py
+```
+"""
+Shared modules package for backend services.
+Provides consistent import mechanisms across different services.
+"""
+
+import os
+import sys
+import importlib
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Define potential module paths
+POTENTIAL_PATHS = [
+    '/app',
+    '/app/shared',
+    '/app/backend/shared',
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # Project root
+    os.path.dirname(os.path.abspath(__file__)),  # Shared module directory
+]
+
+# Add paths to sys.path if not already present
+for path in POTENTIAL_PATHS:
+    if path not in sys.path and os.path.exists(path):
+        sys.path.append(path)
+        logger.debug(f"Added {path} to sys.path")
+
+# Helper function to import a module with fallbacks
+def import_module(module_name, package=None):
+    """
+    Import a module with fallbacks.
+    
+    Args:
+        module_name: The name of the module to import
+        package: The package to import from (optional)
+        
+    Returns:
+        The imported module, or None if not found
+    """
+    # Try different import paths
+    possible_imports = [
+        module_name,  # Direct import
+        f"shared.{module_name}",  # From shared package
+        f"backend.shared.{module_name}",  # From backend.shared package
+    ]
+    
+    if package:
+        possible_imports.extend([
+            f"{package}.{module_name}",
+            f"shared.{package}.{module_name}",
+            f"backend.shared.{package}.{module_name}",
+        ])
+    
+    for import_path in possible_imports:
+        try:
+            return importlib.import_module(import_path)
+        except ImportError:
+            continue
+    
+    return None
+
+# Import key shared modules with fallbacks
+try:
+    # Import logging module
+    logging_module = import_module('logging')
+    
+    # Import middleware modules
+    middleware_module = import_module('middleware')
+    request_id_module = import_module('request_id', 'middleware')
+    
+    # Import database modules
+    database_module = import_module('database')
+    
+    # Import utils modules
+    utils_module = import_module('utils')
+    http_module = import_module('http', 'utils')
+    
+    # Import config
+    config_module = import_module('config')
+    
+    IMPORTS_SUCCESSFUL = True
+except Exception as e:
+    IMPORTS_SUCCESSFUL = False
+    logger.error(f"Error importing shared modules: {e}")
+
+# Define public exports
+__all__ = [
+    'import_module',
+    'logging_module',
+    'middleware_module',
+    'request_id_module',
+    'database_module',
+    'utils_module',
+    'http_module',
+    'config_module',
+] 
+```
+
+
 ### FILE: backend\shared\config.py
 ```
+"""
+Standardized configuration module for backend services.
+Provides consistent configuration across different services.
+"""
+
 import os
-from datetime import timedelta
+from pathlib import Path
 
 class BaseConfig:
-    """Base configuration for all environments"""
-    
-    # Flask
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key')
-    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key')
-    
-    # Database
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
-    
-    # Redis
-    REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-    
-    # CORS
-    CORS_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
-    CORS_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    CORS_HEADERS = ["Content-Type", "Authorization", "X-Service-Key", "X-CSRF-Token"]
-    
-    # Service Integration
-    SERVICE_KEY = os.getenv('SERVICE_KEY', 'your-service-key')
-    AUTH_SERVICE_URL = os.getenv('AUTH_SERVICE_URL', 'http://auth-service:5001')
-    FLASK_SERVICE_URL = os.getenv('FLASK_SERVICE_URL', 'http://backend:5000')
-    
-    # JWT Settings
-    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
-    JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
-    
-    # Rate Limiting
-    RATE_LIMIT_DEFAULT = 100  # requests per minute
-    RATE_LIMIT_AUTH = 5  # auth requests per minute
-    
-    # Session
-    SESSION_COOKIE_SECURE = True
-    SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = 'Lax'
-    PERMANENT_SESSION_LIFETIME = timedelta(days=1)
-
-class DevelopmentConfig(BaseConfig):
-    """Development configuration"""
-    
-    DEBUG = True
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///dev.db')
-    
-    # Disable secure cookies in development
-    SESSION_COOKIE_SECURE = False
-
-class TestingConfig(BaseConfig):
-    """Testing configuration"""
-    
-    TESTING = True
-    SQLALCHEMY_DATABASE_URI = os.getenv('TEST_DATABASE_URL', 'sqlite:///test.db')
-    
-    # Disable secure cookies in testing
-    SESSION_COOKIE_SECURE = False
-    
-    # Increase rate limits for testing
-    RATE_LIMIT_DEFAULT = 1000
-    RATE_LIMIT_AUTH = 100
-
-class ProductionConfig(BaseConfig):
-    """Production configuration"""
-    
+    """Base configuration settings shared across all environments"""
+    # Environment settings
     DEBUG = False
     TESTING = False
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL')
+    ENV = 'production'
     
-    # Stricter security settings
-    SESSION_COOKIE_SECURE = True
-    SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = 'Strict'
+    # Application settings
+    API_PREFIX = "/api"
     
-    # Lower rate limits for production
-    RATE_LIMIT_DEFAULT = 60
-    RATE_LIMIT_AUTH = 3
+    # Security settings
+    SECRET_KEY = os.environ.get("SECRET_KEY")
+    JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+    SERVICE_KEY = os.environ.get("SERVICE_KEY")
+    JWT_ALGORITHM = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRES = 60 * 60  # 1 hour
+    JWT_REFRESH_TOKEN_EXPIRES = 30 * 24 * 60 * 60  # 30 days
+    BCRYPT_LOG_ROUNDS = 13
+    
+    # Database settings
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    
+    # Redis settings
+    REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    REDIS_TOKEN_BLACKLIST_DB = 1
+    
+    # CORS settings
+    CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
+    CORS_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    CORS_HEADERS = ["Content-Type", "Authorization", "X-Service-Key", "X-Request-ID", "X-Correlation-ID"]
+    
+    # Logging settings
+    LOG_LEVEL = "INFO"
+    JSON_LOGS = os.environ.get("JSON_LOGS", "true").lower() == "true"
+    LOG_TO_FILE = os.environ.get("LOG_TO_FILE", "false").lower() == "true"
+    LOG_FILE = os.environ.get("LOG_FILE", "logs/app.log")
+    
+    # Service discovery settings
+    SERVICE_DISCOVERY_PROVIDER = os.environ.get("SERVICE_DISCOVERY_PROVIDER", "env")
+    
+    # Secret management settings
+    SECRET_MANAGER_TYPE = os.environ.get("SECRET_MANAGER_TYPE", "env")
+    
+    # File paths
+    ROOT_DIR = Path("/app")
+    LOG_DIR = ROOT_DIR / "logs"
+    
+    # Ensure directories exist
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Service URLs
+    AUTH_SERVICE_URL = os.environ.get("AUTH_SERVICE_URL", "http://auth-service:5001")
+    BACKEND_SERVICE_URL = os.environ.get("BACKEND_SERVICE_URL", "http://backend:5000")
+    WEBSOCKET_SERVICE_URL = os.environ.get("WEBSOCKET_SERVICE_URL", "http://websocket:3001")
+    FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
-# Configuration dictionary
+
+class DevelopmentConfig(BaseConfig):
+    """Development environment specific configuration"""
+    DEBUG = True
+    ENV = 'development'
+    LOG_LEVEL = "DEBUG"
+    
+    # More lenient security settings for development
+    BCRYPT_LOG_ROUNDS = 4
+    JWT_ACCESS_TOKEN_EXPIRES = 24 * 60 * 60  # 24 hours in development
+    
+    # Enable detailed error messages and SQL query logging
+    SQLALCHEMY_ECHO = True
+    
+    # Development-specific settings
+    PRESERVE_CONTEXT_ON_EXCEPTION = False
+    
+    # Extended CORS settings for development
+    CORS_ORIGINS = os.environ.get("CORS_ORIGINS", 
+                                "http://localhost:3000,http://127.0.0.1:3000").split(",")
+
+
+class TestingConfig(BaseConfig):
+    """Testing environment specific configuration"""
+    TESTING = True
+    DEBUG = True
+    ENV = 'testing'
+    
+    # Use in-memory database for testing
+    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+    
+    # Disable CSRF protection for testing
+    WTF_CSRF_ENABLED = False
+    
+    # Faster password hashing for tests
+    BCRYPT_LOG_ROUNDS = 4
+    
+    # Shorter token expiration for testing
+    JWT_ACCESS_TOKEN_EXPIRES = 300  # 5 minutes
+    JWT_REFRESH_TOKEN_EXPIRES = 600  # 10 minutes
+    
+    # Mock external services
+    REDIS_URL = "redis://localhost:6379/2"
+    
+    # Disable email sending in tests
+    MAIL_SUPPRESS_SEND = True
+
+
+class ProductionConfig(BaseConfig):
+    """Production environment specific configuration"""
+    LOG_LEVEL = "INFO"
+    
+    # Production security settings
+    WTF_CSRF_SSL_STRICT = True
+    PREFERRED_URL_SCHEME = 'https'
+    
+    # Set stricter CORS
+    CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "https://yourdomain.com").split(",")
+    
+    # Production database settings
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_size': 10,
+        'pool_recycle': 300,
+        'pool_pre_ping': True,
+        'max_overflow': 15
+    }
+    
+    # Enhanced logging for production
+    LOG_TO_FILE = True
+
+
+class AuthServiceConfig(BaseConfig):
+    """Auth service specific configuration"""
+    APP_NAME = "Auth Service"
+    SQLALCHEMY_DATABASE_URI = os.environ.get("AUTH_DATABASE_URL")
+    OAUTH_PROVIDERS = {
+        'google': {
+            'client_id': os.environ.get("GOOGLE_CLIENT_ID"),
+            'client_secret': os.environ.get("GOOGLE_CLIENT_SECRET")
+        }
+    }
+
+
+class FlaskServiceConfig(BaseConfig):
+    """Flask service specific configuration"""
+    APP_NAME = "Meeting API Service"
+    SQLALCHEMY_DATABASE_URI = os.environ.get("BACKEND_DATABASE_URL")
+
+
+class WebsocketServiceConfig(BaseConfig):
+    """Websocket service specific configuration"""
+    APP_NAME = "Websocket Service"
+    WEBSOCKET_PORT = int(os.environ.get("WEBSOCKET_PORT", 3001))
+
+
+# Config dictionary mapping
 config = {
     'development': DevelopmentConfig,
     'testing': TestingConfig,
     'production': ProductionConfig,
-    'default': DevelopmentConfig
-} 
+    'default': DevelopmentConfig,
+    'auth': AuthServiceConfig,
+    'flask': FlaskServiceConfig,
+    'websocket': WebsocketServiceConfig,
+}
+
+
+def get_config(env_name=None):
+    """
+    Get configuration based on environment name.
+    
+    Args:
+        env_name: Environment name ('development', 'testing', 'production')
+        
+    Returns:
+        Configuration class
+    """
+    if not env_name:
+        env_name = os.environ.get('FLASK_ENV', 'development')
+    
+    # Combine service-specific config with env-specific config
+    service_type = os.environ.get('SERVICE_TYPE', 'default')
+    base_config = config.get(env_name, config['default'])
+    service_config = config.get(service_type, config['default'])
+    
+    # Create a new config class that inherits from both
+    class CombinedConfig(service_config, base_config):
+        pass
+    
+    return CombinedConfig 
 ```
 
 
@@ -18126,6 +18413,182 @@ def init_db(app):
     
     with app.app_context():
         db.create_all() 
+```
+
+
+### FILE: backend\shared\errors.py
+```
+"""
+Standardized error handling for backend services.
+Provides common error classes and utilities for consistent error responses.
+"""
+
+import logging
+import traceback
+from datetime import datetime
+from typing import Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
+
+# Try to import request ID functionality
+try:
+    from backend.shared.middleware.request_id import get_request_id
+    HAS_REQUEST_ID = True
+except ImportError:
+    try:
+        from shared.middleware.request_id import get_request_id
+        HAS_REQUEST_ID = True
+    except ImportError:
+        HAS_REQUEST_ID = False
+
+class APIError(Exception):
+    """Base exception class for API errors with status code and message"""
+    
+    def __init__(self, message: str, status_code: int = 400, details: Optional[Dict[str, Any]] = None):
+        """
+        Initialize API error.
+        
+        Args:
+            message: Error message
+            status_code: HTTP status code
+            details: Additional error details
+        """
+        self.message = message
+        self.status_code = status_code
+        self.details = details or {}
+        self.timestamp = datetime.utcnow().isoformat() + 'Z'
+        
+        # Add request ID if available
+        if HAS_REQUEST_ID:
+            self.request_id = get_request_id()
+        else:
+            self.request_id = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert exception to dictionary representation.
+        
+        Returns:
+            Dictionary with error details
+        """
+        error_dict = {
+            'error': True,
+            'status_code': self.status_code,
+            'message': self.message,
+            'timestamp': self.timestamp
+        }
+        
+        # Include request ID if available
+        if hasattr(self, 'request_id') and self.request_id:
+            error_dict['request_id'] = self.request_id
+        
+        # Include additional details if provided
+        if self.details:
+            error_dict['details'] = self.details
+        
+        return error_dict
+
+# --- User and Authentication Errors ---
+
+class ValidationError(APIError):
+    """Exception for data validation errors"""
+    
+    def __init__(self, message: str = "Validation error", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=422, details=details)
+
+class AuthenticationError(APIError):
+    """Exception for authentication failures"""
+    
+    def __init__(self, message: str = "Authentication required", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=401, details=details)
+
+class AuthorizationError(APIError):
+    """Exception for authorization failures"""
+    
+    def __init__(self, message: str = "Not authorized", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=403, details=details)
+
+class UserExistsError(APIError):
+    """Exception for duplicate user registration"""
+    
+    def __init__(self, message: str = "User already exists", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=409, details=details)
+
+class UserNotFoundError(APIError):
+    """Exception for user not found"""
+    
+    def __init__(self, message: str = "User not found", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=404, details=details)
+
+class TokenError(APIError):
+    """Exception for token validation failures"""
+    
+    def __init__(self, message: str = "Invalid or expired token", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=401, details=details)
+
+# --- Resource Errors ---
+
+class ResourceNotFoundError(APIError):
+    """Exception for resource not found"""
+    
+    def __init__(self, message: str = "Resource not found", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=404, details=details)
+
+class ResourceExistsError(APIError):
+    """Exception for duplicate resource"""
+    
+    def __init__(self, message: str = "Resource already exists", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=409, details=details)
+
+# --- Service Errors ---
+
+class ServiceError(APIError):
+    """Exception for service failures"""
+    
+    def __init__(self, message: str = "Service error", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=500, details=details)
+
+class ConfigurationError(APIError):
+    """Exception for configuration errors"""
+    
+    def __init__(self, message: str = "Configuration error", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=500, details=details)
+
+class DependencyError(APIError):
+    """Exception for dependency failures"""
+    
+    def __init__(self, message: str = "Dependency error", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=503, details=details)
+
+class RateLimitError(APIError):
+    """Exception for rate limiting"""
+    
+    def __init__(self, message: str = "Rate limit exceeded", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=429, details=details)
+
+class EmailError(APIError):
+    """Exception for email sending failures"""
+    
+    def __init__(self, message: str = "Failed to send email", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message, status_code=500, details=details)
+
+# Export all error classes
+__all__ = [
+    'APIError',
+    'ValidationError',
+    'AuthenticationError',
+    'AuthorizationError',
+    'UserExistsError',
+    'UserNotFoundError',
+    'TokenError',
+    'ResourceNotFoundError',
+    'ResourceExistsError',
+    'ServiceError',
+    'ConfigurationError',
+    'DependencyError',
+    'RateLimitError',
+    'EmailError',
+] 
 ```
 
 
@@ -19551,322 +20014,421 @@ class StaticServiceDiscovery(ServiceDiscovery):
 ### FILE: backend\shared\logging\__init__.py
 ```
 """
-Structured JSON logging module.
-Provides configurable JSON logging with request ID correlation.
+Shared logging module for backend services.
+Provides structured JSON logging and request ID tracking.
+"""
+
+from .config import (
+    setup_logging,
+    get_log_config,
+    JSONFormatter,
+    RequestIDLogFilter,
+    configure_library_loggers
+)
+
+__all__ = [
+    'setup_logging',
+    'get_log_config',
+    'JSONFormatter',
+    'RequestIDLogFilter',
+    'configure_library_loggers'
+] 
+```
+
+
+### FILE: backend\shared\logging\config.py
+```
+"""
+Standardized logging configuration for all backend services.
+Supports structured JSON logging and request ID tracking.
 """
 
 import os
 import sys
-import logging
 import json
-import datetime
-import socket
-import platform
-import traceback
-from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
+import logging
+import logging.config
+from datetime import datetime
+from functools import partial
 
-# Check if python-json-logger is available
-try:
-    from pythonjsonlogger import jsonlogger
-    HAS_JSON_LOGGER = True
-except ImportError:
-    HAS_JSON_LOGGER = False
+# Configure third-party library logging
+def configure_library_loggers():
+    """Configure third-party library loggers to reduce noise"""
+    # Set higher log levels for noisy libraries
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("botocore").setLevel(logging.WARNING)
+    logging.getLogger("boto3").setLevel(logging.WARNING)
+    logging.getLogger("requests").setLevel(logging.WARNING)
 
-# Check if structlog is available
-try:
-    import structlog
-    HAS_STRUCTLOG = True
-except ImportError:
-    HAS_STRUCTLOG = False
 
-DEFAULT_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-DEFAULT_JSON_FORMAT = '%(asctime)s %(name)s %(levelname)s %(message)s'
-
-# Default configuration
-DEFAULT_CONFIG = {
-    'level': 'INFO',
-    'format': DEFAULT_FORMAT,
-    'json_enabled': True,
-    'json_format': DEFAULT_JSON_FORMAT,
-    'console_enabled': True,
-    'file_enabled': False,
-    'file_path': 'logs/app.log',
-    'file_max_bytes': 10 * 1024 * 1024,  # 10 MB
-    'file_backup_count': 5,
-    'timed_file_enabled': False,
-    'timed_file_path': 'logs/app.log',
-    'timed_file_when': 'midnight',
-    'timed_file_interval': 1,
-    'timed_file_backup_count': 30,
-    'propagate': False,
-    'service_name': 'unknown',
-    'include_request_id': True,
-}
-
-def get_request_id():
-    """
-    Get the current request ID from the request_id module if available.
-    
-    Returns:
-        str: The current request ID, or None if not available.
-    """
-    try:
-        from ..middleware.request_id import get_request_id as get_req_id
-        return get_req_id()
-    except ImportError:
-        return None
-
-class RequestIdFilter(logging.Filter):
-    """
-    Filter that adds request ID to log records.
-    """
+class RequestIDLogFilter(logging.Filter):
+    """Log filter that adds request and correlation IDs to log records."""
     
     def filter(self, record):
-        """
-        Add request ID to the log record.
+        """Add request_id and correlation_id fields to log records."""
+        from flask import g, request, has_request_context
         
-        Args:
-            record: Log record
+        # Default values
+        record.request_id = "no_request_id"
+        record.correlation_id = "no_correlation_id"
+        record.user_id = "no_user"
+        
+        # Add request context if available
+        if has_request_context():
+            record.request_id = getattr(g, 'request_id', request.headers.get('X-Request-ID', 'no_request_id'))
+            record.correlation_id = getattr(g, 'correlation_id', request.headers.get('X-Correlation-ID', 'no_correlation_id'))
+            record.user_id = getattr(g, 'user_id', 'anonymous')
             
-        Returns:
-            bool: Always True (we're not filtering out records, just enhancing them)
-        """
-        record.request_id = get_request_id() or '-'
+            # Add request path and method if available
+            record.path = request.path
+            record.method = request.method
+        
         return True
 
-class ServiceInfoFilter(logging.Filter):
+
+class JSONFormatter(logging.Formatter):
     """
-    Filter that adds service information to log records.
+    JSON log formatter that outputs logs in a structured format.
+    Includes service name, timestamp, level, message, and additional context.
     """
     
-    def __init__(self, service_name='unknown'):
+    def __init__(self, service_name=None):
         """
-        Initialize the filter.
+        Initialize the formatter with service name.
         
         Args:
-            service_name: Name of the service
+            service_name: Optional service name to include in logs
         """
         super().__init__()
-        self.service_name = service_name
-        self.hostname = socket.gethostname()
-        self.pid = os.getpid()
-        self.platform_info = platform.platform()
+        self.service_name = service_name or os.environ.get('SERVICE_NAME', 'unknown')
     
-    def filter(self, record):
+    def format(self, record):
         """
-        Add service information to the log record.
+        Format the log record as a JSON object.
         
         Args:
-            record: Log record
+            record: The log record to format
             
         Returns:
-            bool: Always True
+            JSON formatted log string
         """
-        record.service = self.service_name
-        record.hostname = self.hostname
-        record.pid = self.pid
-        record.platform = self.platform_info
-        return True
-
-class CustomJsonFormatter(jsonlogger.JsonFormatter):
-    """
-    Custom JSON formatter with enhanced fields.
-    """
-    
-    def add_fields(self, log_record, record, message_dict):
-        """
-        Add custom fields to the log record.
+        log_data = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'service': self.service_name,
+            'level': record.levelname,
+            'message': record.getMessage(),
+            'logger': record.name,
+            'module': record.module,
+            'function': record.funcName,
+            'line': record.lineno,
+        }
         
-        Args:
-            log_record: JSON log record
-            record: Log record
-            message_dict: Message dictionary
-        """
-        super().add_fields(log_record, record, message_dict)
+        # Add request context if available
+        if hasattr(record, 'request_id'):
+            log_data['request_id'] = record.request_id
         
-        # Add timestamp if not present
-        if not log_record.get('timestamp'):
-            log_record['timestamp'] = datetime.datetime.utcnow().isoformat() + 'Z'
-        
-        # Add log level if not present
-        if not log_record.get('level'):
-            log_record['level'] = record.levelname
-        
-        # Add request ID if available and not present
-        if hasattr(record, 'request_id') and not log_record.get('request_id'):
-            log_record['request_id'] = record.request_id
-        
-        # Add service info if available and not present
-        if hasattr(record, 'service') and not log_record.get('service'):
-            log_record['service'] = record.service
-        
-        if hasattr(record, 'hostname') and not log_record.get('hostname'):
-            log_record['hostname'] = record.hostname
-        
-        if hasattr(record, 'pid') and not log_record.get('pid'):
-            log_record['pid'] = record.pid
+        if hasattr(record, 'correlation_id'):
+            log_data['correlation_id'] = record.correlation_id
+            
+        if hasattr(record, 'user_id'):
+            log_data['user_id'] = record.user_id
+            
+        if hasattr(record, 'path'):
+            log_data['path'] = record.path
+            
+        if hasattr(record, 'method'):
+            log_data['method'] = record.method
         
         # Add exception info if available
-        if record.exc_info and not log_record.get('exception'):
-            exception = {
+        if record.exc_info:
+            log_data['exception'] = {
                 'type': record.exc_info[0].__name__,
                 'message': str(record.exc_info[1]),
-                'traceback': traceback.format_exception(*record.exc_info)
+                'traceback': self.formatException(record.exc_info)
             }
-            log_record['exception'] = exception
+            
+        # Add any extra attributes
+        for key, value in record.__dict__.items():
+            if key not in ['args', 'asctime', 'created', 'exc_info', 'exc_text', 
+                           'filename', 'funcName', 'id', 'levelname', 'levelno', 
+                           'lineno', 'module', 'msecs', 'message', 'msg', 'name', 
+                           'pathname', 'process', 'processName', 'relativeCreated', 
+                           'request_id', 'correlation_id', 'stack_info', 'thread', 
+                           'threadName', 'user_id', 'path', 'method']:
+                if not key.startswith('_'):
+                    log_data[key] = value
+        
+        return json.dumps(log_data)
 
-def configure_logging(config=None):
+
+def get_log_config(service_name=None, log_level=None, json_logs=True, log_to_file=False, log_file=None):
     """
-    Configure structured logging with JSON format and request ID tracking.
+    Get logging configuration dictionary for a service.
     
     Args:
-        config: Configuration dictionary (defaults will be used for missing values)
-    
+        service_name: Name of the service for log identification
+        log_level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        json_logs: Whether to use JSON formatting (default: True)
+        log_to_file: Whether to log to a file (default: False)
+        log_file: Path to the log file if log_to_file is True
+        
     Returns:
-        logging.Logger: Root logger
+        Logging configuration dictionary
     """
-    # Merge config with defaults
-    cfg = DEFAULT_CONFIG.copy()
-    if config:
-        cfg.update(config)
+    # Default settings
+    service_name = service_name or os.environ.get('SERVICE_NAME', 'service')
+    log_level = log_level or os.environ.get('LOG_LEVEL', 'INFO')
+    json_logs = json_logs if json_logs is not None else (os.environ.get('JSON_LOGS', 'true').lower() == 'true')
+    log_to_file = log_to_file if log_to_file is not None else (os.environ.get('LOG_TO_FILE', 'false').lower() == 'true')
+    log_file = log_file or os.environ.get('LOG_FILE', f'/app/logs/{service_name}.log')
     
-    # Get root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(getattr(logging, cfg['level'].upper()))
+    # Define formatters
+    formatters = {
+        'json': {
+            '()': partial(JSONFormatter, service_name=service_name)
+        },
+        'standard': {
+            'format': '%(asctime)s [%(levelname)s] %(name)s [%(request_id)s] [%(correlation_id)s] - %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S'
+        }
+    }
     
-    # Remove existing handlers
-    for handler in list(root_logger.handlers):
-        root_logger.removeHandler(handler)
+    # Define handlers
+    handlers = {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'level': log_level,
+            'formatter': 'json' if json_logs else 'standard',
+            'stream': 'ext://sys.stdout'
+        }
+    }
     
-    # Create handlers
-    handlers = []
+    # Add file handler if enabled
+    if log_to_file:
+        handlers['file'] = {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'level': log_level,
+            'formatter': 'json' if json_logs else 'standard',
+            'filename': log_file,
+            'maxBytes': 10485760,  # 10MB
+            'backupCount': 5,
+            'encoding': 'utf8'
+        }
     
-    # Console handler
-    if cfg['console_enabled']:
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(getattr(logging, cfg['level'].upper()))
-        handlers.append(console_handler)
+    # Define filters
+    filters = {
+        'request_id': {
+            '()': RequestIDLogFilter
+        }
+    }
     
-    # File handler
-    if cfg['file_enabled']:
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(cfg['file_path']), exist_ok=True)
-        
-        file_handler = RotatingFileHandler(
-            cfg['file_path'],
-            maxBytes=cfg['file_max_bytes'],
-            backupCount=cfg['file_backup_count']
-        )
-        file_handler.setLevel(getattr(logging, cfg['level'].upper()))
-        handlers.append(file_handler)
+    # Create config dictionary
+    log_config = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': formatters,
+        'filters': filters,
+        'handlers': handlers,
+        'loggers': {
+            '': {  # Root logger
+                'level': log_level,
+                'handlers': ['console'] + (['file'] if log_to_file else []),
+                'filters': ['request_id'],
+                'propagate': False
+            },
+            service_name: {
+                'level': log_level,
+                'handlers': ['console'] + (['file'] if log_to_file else []),
+                'filters': ['request_id'],
+                'propagate': False
+            },
+            'werkzeug': {
+                'level': 'WARNING',
+                'handlers': ['console'] + (['file'] if log_to_file else []),
+                'propagate': False
+            },
+            'sqlalchemy': {
+                'level': 'WARNING',
+                'handlers': ['console'] + (['file'] if log_to_file else []),
+                'propagate': False
+            }
+        }
+    }
     
-    # Timed rotating file handler
-    if cfg['timed_file_enabled']:
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(cfg['timed_file_path']), exist_ok=True)
-        
-        timed_file_handler = TimedRotatingFileHandler(
-            cfg['timed_file_path'],
-            when=cfg['timed_file_when'],
-            interval=cfg['timed_file_interval'],
-            backupCount=cfg['timed_file_backup_count']
-        )
-        timed_file_handler.setLevel(getattr(logging, cfg['level'].upper()))
-        handlers.append(timed_file_handler)
-    
-    # Add filters to all handlers
-    for handler in handlers:
-        # Add request ID filter if requested
-        if cfg['include_request_id']:
-            handler.addFilter(RequestIdFilter())
-        
-        # Add service info filter
-        handler.addFilter(ServiceInfoFilter(cfg['service_name']))
-        
-        # Set formatter
-        if cfg['json_enabled'] and HAS_JSON_LOGGER:
-            # Use JSON formatter
-            formatter = CustomJsonFormatter(cfg['json_format'])
-        else:
-            # Use standard formatter
-            formatter = logging.Formatter(cfg['format'])
-        
-        handler.setFormatter(formatter)
-        
-        # Add handler to root logger
-        root_logger.addHandler(handler)
-    
-    # Configure structlog if available
-    if HAS_STRUCTLOG:
-        configure_structlog(cfg)
-    
-    return root_logger
+    return log_config
 
-def configure_structlog(config):
+
+def setup_logging(app=None, service_name=None, log_level=None, json_logs=True, log_to_file=False, log_file=None):
     """
-    Configure structlog with JSON format and request ID tracking.
+    Set up logging for a Flask application or globally.
     
     Args:
-        config: Configuration dictionary
+        app: Optional Flask application instance
+        service_name: Name of the service
+        log_level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        json_logs: Whether to use JSON formatting
+        log_to_file: Whether to log to a file
+        log_file: Path to the log file if log_to_file is True
     """
-    # Define processors for structlog
-    processors = [
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-    ]
+    # Configure third-party loggers
+    configure_library_loggers()
     
-    # Add custom processors
-    if config['include_request_id']:
-        processors.append(lambda _, __, event_dict: event_dict.update({"request_id": get_request_id() or "-"}))
+    # Get service name from app if available and not explicitly provided
+    if app and not service_name:
+        service_name = app.config.get('APP_NAME', app.name)
     
-    processors.append(lambda _, __, event_dict: event_dict.update({"service": config['service_name']}))
-    processors.append(lambda _, __, event_dict: event_dict.update({"hostname": socket.gethostname()}))
+    # Get log level from app if available and not explicitly provided
+    if app and not log_level:
+        log_level = app.config.get('LOG_LEVEL', 'INFO')
+        
+    # Get JSON logs setting from app if available
+    if app and json_logs is None:
+        json_logs = app.config.get('JSON_LOGS', True)
+        
+    # Get log to file setting from app if available
+    if app and log_to_file is None:
+        log_to_file = app.config.get('LOG_TO_FILE', False)
+        
+    # Get log file path from app if available and enabled
+    if app and log_to_file and not log_file:
+        log_file = app.config.get('LOG_FILE', f'/app/logs/{service_name}.log')
     
-    # Add renderer based on JSON formatting preference
-    if config['json_enabled']:
-        processors.append(structlog.processors.JSONRenderer())
-    else:
-        processors.append(structlog.dev.ConsoleRenderer())
-    
-    # Configure structlog
-    structlog.configure(
-        processors=processors,
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,
-        cache_logger_on_first_use=True,
+    # Get logging config
+    log_config = get_log_config(
+        service_name=service_name,
+        log_level=log_level,
+        json_logs=json_logs,
+        log_to_file=log_to_file,
+        log_file=log_file
     )
-
-def get_logger(name, config=None):
-    """
-    Get a logger configured for structured logging.
     
-    Args:
-        name: Logger name
-        config: Optional configuration override
-        
-    Returns:
-        logging.Logger: Logger instance
-    """
-    # Configure base logging if needed
-    if not config and not logging.getLogger().handlers:
-        configure_logging()
-    elif config:
-        configure_logging(config)
+    # Configure logging
+    logging.config.dictConfig(log_config)
     
-    # Get logger
-    logger = logging.getLogger(name)
+    # Create a logger for this service
+    logger = logging.getLogger(service_name)
     
-    # Return structlog logger if available
-    if HAS_STRUCTLOG:
-        return structlog.get_logger(name)
+    # Log startup message
+    logger.info(f"Logging initialized for {service_name} at {log_level} level")
     
     return logger 
+```
+
+
+### FILE: backend\shared\middleware\__init__.py
+```
+"""
+Shared middleware module for backend services.
+Provides middleware for request ID tracking, logging, and more.
+"""
+
+from typing import List, Callable, Dict, Any, Optional, Type
+import logging
+import importlib
+
+logger = logging.getLogger(__name__)
+
+# Define middleware interface
+class Middleware:
+    """Base class for all middleware"""
+    
+    def __init__(self, app=None, **kwargs):
+        """Initialize middleware with optional app"""
+        self.app = app
+        if app is not None:
+            self.init_app(app, **kwargs)
+    
+    def init_app(self, app, **kwargs):
+        """Initialize middleware with app"""
+        raise NotImplementedError("Middleware must implement init_app")
+        
+    def process_request(self, request):
+        """Process request before it reaches the view"""
+        return None
+        
+    def process_response(self, request, response):
+        """Process response after it leaves the view"""
+        return response
+        
+    def __call__(self, environ, start_response):
+        """WSGI middleware interface"""
+        raise NotImplementedError("Middleware must implement __call__")
+
+
+# Try to import specific middleware modules
+# If not available, provide dummy implementations
+try:
+    from .request_id import RequestIdMiddleware
+except ImportError:
+    class RequestIdMiddleware(Middleware):
+        """Dummy implementation of RequestIdMiddleware"""
+        def init_app(self, app, **kwargs):
+            logger.warning("Using dummy RequestIdMiddleware")
+            
+        def __call__(self, environ, start_response):
+            return self.app(environ, start_response)
+
+
+# Default middleware configuration
+DEFAULT_MIDDLEWARE = {
+    'request_id': {
+        'class': RequestIdMiddleware,
+        'kwargs': {
+            'request_id_header': 'X-Request-ID',
+            'correlation_id_header': 'X-Correlation-ID'
+        }
+    }
+}
+
+
+def register_middleware(app, middleware_list=None):
+    """
+    Register middleware with a Flask application.
+    
+    Args:
+        app: Flask application
+        middleware_list: List of middleware configurations or None for defaults
+        
+    Returns:
+        Flask application with middleware registered
+    """
+    # Use default middleware if none specified
+    if middleware_list is None:
+        middleware_list = list(DEFAULT_MIDDLEWARE.values())
+    
+    # Add each middleware to the application
+    for middleware_config in middleware_list:
+        if isinstance(middleware_config, dict):
+            middleware_class = middleware_config.get('class')
+            kwargs = middleware_config.get('kwargs', {})
+            
+            if middleware_class:
+                try:
+                    middleware = middleware_class()
+                    middleware.init_app(app, **kwargs)
+                    logger.info(f"Registered middleware: {middleware_class.__name__}")
+                except Exception as e:
+                    logger.error(f"Failed to register middleware {middleware_class.__name__}: {str(e)}")
+        elif isinstance(middleware_config, Middleware):
+            # If middleware instance is provided directly
+            try:
+                middleware_config.init_app(app)
+                logger.info(f"Registered middleware: {middleware_config.__class__.__name__}")
+            except Exception as e:
+                logger.error(f"Failed to register middleware {middleware_config.__class__.__name__}: {str(e)}")
+    
+    return app
+
+
+# Import specific middleware to make them available at package level
+__all__ = [
+    'Middleware',
+    'RequestIdMiddleware', 
+    'register_middleware'
+] 
 ```
 
 
@@ -20186,196 +20748,274 @@ def rate_limit(limit: int, window: int, key_func=None):
 ### FILE: backend\shared\middleware\request_id.py
 ```
 """
-Request ID middleware for generating and tracking correlation IDs.
-Provides middleware for Flask applications to assign unique IDs to requests
-and propagate them across services.
+Request ID middleware module for tracking requests across services.
+Generates and propagates request and correlation IDs.
 """
 
-import uuid
 import logging
+import uuid
 import threading
-from flask import request, g, current_app
-from werkzeug.local import LocalProxy
+from functools import wraps
+from flask import Flask, request, g, has_request_context, current_app
+from werkzeug.wsgi import ClosingIterator
+from werkzeug.exceptions import HTTPException
+from typing import Optional, Dict, Any, Callable, Union, List, Tuple
 
-# Thread-local storage for the current request ID (used outside request context)
-_request_id_storage = threading.local()
+try:
+    from . import Middleware
+except (ImportError, ValueError):
+    # Fallback if parent module not available
+    class Middleware:
+        """Base middleware class fallback"""
+        def __init__(self, app=None, **kwargs):
+            self.app = app
+            if app is not None:
+                self.init_app(app, **kwargs)
+                
+        def init_app(self, app, **kwargs):
+            pass
 
-# Logger for this module
+# Thread-local storage for request ID when Flask context is not available
+_request_id_local = threading.local()
+
 logger = logging.getLogger(__name__)
 
-# Default header names
-DEFAULT_REQUEST_ID_HEADER = 'X-Request-ID'
-DEFAULT_CORRELATION_ID_HEADER = 'X-Correlation-ID'
+class RequestIdMiddleware(Middleware):
+    """
+    WSGI middleware that assigns a unique request ID to each incoming request.
+    Optionally preserves request ID from request header if present.
+    """
+    
+    def __init__(self, app=None, **kwargs):
+        """Initialize middleware with optional app"""
+        self.app = app
+        self.request_id_header = 'X-Request-ID'
+        self.correlation_id_header = 'X-Correlation-ID'
+        self.include_in_response = True
+        
+        if app is not None:
+            self.init_app(app, **kwargs)
+            
+    def init_app(self, app: Flask, **kwargs):
+        """
+        Initialize middleware with Flask application.
+        
+        Args:
+            app: Flask application
+            request_id_header: Name of header containing request ID
+            correlation_id_header: Name of header containing correlation ID
+            include_in_response: Whether to include request/correlation IDs in response
+        """
+        # Store configuration
+        self.request_id_header = kwargs.get('request_id_header', self.request_id_header)
+        self.correlation_id_header = kwargs.get('correlation_id_header', self.correlation_id_header)
+        self.include_in_response = kwargs.get('include_in_response', self.include_in_response)
+        
+        # Register middleware with Flask
+        app.before_request(self.before_request)
+        app.after_request(self.after_request)
+        app.teardown_request(self.teardown_request)
+        
+        # Add endpoint to get current request ID (useful for testing/debugging)
+        app.add_url_rule('/_request_id', '_request_id', self.request_id_endpoint)
+        
+        # Wrap application with WSGI middleware
+        if not hasattr(app, 'wsgi_app_wrapped_by_request_id') or not app.wsgi_app_wrapped_by_request_id:
+            original_wsgi_app = app.wsgi_app
+            app.wsgi_app = self
+            app.wsgi_app_wrapped_by_request_id = True
+            self.app = original_wsgi_app
+            
+        logger.info(f"RequestIdMiddleware initialized with headers: {self.request_id_header}, {self.correlation_id_header}")
+        
+    def __call__(self, environ, start_response):
+        """
+        WSGI middleware implementation.
+        
+        Args:
+            environ: WSGI environment
+            start_response: WSGI start_response function
+            
+        Returns:
+            WSGI response
+        """
+        # Extract request ID from environment or generate new one
+        request_id = environ.get('HTTP_' + self.request_id_header.replace('-', '_').upper())
+        correlation_id = environ.get('HTTP_' + self.correlation_id_header.replace('-', '_').upper())
+        
+        # Generate IDs if not present
+        if not request_id:
+            request_id = str(uuid.uuid4())
+        
+        if not correlation_id:
+            correlation_id = request_id
+            
+        # Store in environment for downstream WSGI applications
+        environ['request_id'] = request_id
+        environ['correlation_id'] = correlation_id
+        
+        # Store in thread-local for access outside request context
+        _request_id_local.request_id = request_id
+        _request_id_local.correlation_id = correlation_id
+        
+        # Function to intercept the status and headers
+        def custom_start_response(status, headers, exc_info=None):
+            # Add request ID header to response if configured
+            if self.include_in_response:
+                headers_list = list(headers)
+                headers_list.append((self.request_id_header, request_id))
+                headers_list.append((self.correlation_id_header, correlation_id))
+                headers = headers_list
+            
+            return start_response(status, headers, exc_info)
+        
+        # Process request
+        try:
+            return ClosingIterator(
+                self.app(environ, custom_start_response),
+                self.cleanup_request
+            )
+        except Exception as e:
+            # Clean up if an exception occurs
+            self.cleanup_request()
+            raise
+    
+    def before_request(self):
+        """Before request handler for Flask."""
+        # Get request ID from headers or generate new one
+        request_id = request.headers.get(self.request_id_header)
+        correlation_id = request.headers.get(self.correlation_id_header)
+        
+        # Generate IDs if not present
+        if not request_id:
+            request_id = str(uuid.uuid4())
+        
+        if not correlation_id:
+            correlation_id = request_id
+        
+        # Store in Flask g for access within request
+        g.request_id = request_id
+        g.correlation_id = correlation_id
+        
+        # Store in thread-local for access outside request context
+        _request_id_local.request_id = request_id
+        _request_id_local.correlation_id = correlation_id
+        
+        logger.debug(f"Request {request_id} started: {request.method} {request.path}")
+    
+    def after_request(self, response):
+        """
+        After request handler for Flask.
+        
+        Args:
+            response: Flask response
+            
+        Returns:
+            Modified response with request ID headers
+        """
+        # Add request ID headers to response if configured
+        if self.include_in_response:
+            response.headers.setdefault(
+                self.request_id_header, 
+                getattr(g, 'request_id', 'unknown')
+            )
+            response.headers.setdefault(
+                self.correlation_id_header, 
+                getattr(g, 'correlation_id', 'unknown')
+            )
+        
+        logger.debug(f"Request {getattr(g, 'request_id', 'unknown')} completed with status {response.status_code}")
+        return response
+    
+    def teardown_request(self, exception=None):
+        """
+        Teardown request handler for Flask.
+        
+        Args:
+            exception: Exception if an error occurred during request processing
+        """
+        if exception:
+            logger.error(f"Request {getattr(g, 'request_id', 'unknown')} failed: {str(exception)}")
+    
+    def cleanup_request(self):
+        """Clean up request resources."""
+        # Clear thread-local storage
+        if hasattr(_request_id_local, 'request_id'):
+            del _request_id_local.request_id
+        if hasattr(_request_id_local, 'correlation_id'):
+            del _request_id_local.correlation_id
+    
+    def request_id_endpoint(self):
+        """Endpoint that returns the current request ID."""
+        return {
+            'request_id': get_request_id(),
+            'correlation_id': get_correlation_id()
+        }
 
-def get_request_id():
+
+# Helper functions to access request IDs outside middleware
+def get_request_id() -> str:
     """
     Get the current request ID.
     
     Returns:
-        str: The current request ID, or None if not set.
+        str: Request ID from Flask g, or thread-local, or None
     """
-    # First try to get from Flask's g object (within request context)
     if has_request_context():
         return getattr(g, 'request_id', None)
     
-    # Fall back to thread-local storage (outside request context)
-    return getattr(_request_id_storage, 'request_id', None)
+    return getattr(_request_id_local, 'request_id', None)
 
-def set_request_id(request_id):
+
+def get_correlation_id() -> str:
     """
-    Set the current request ID.
-    
-    Args:
-        request_id: The request ID to set.
-    """
-    if has_request_context():
-        g.request_id = request_id
-    else:
-        _request_id_storage.request_id = request_id
-
-def clear_request_id():
-    """Clear the current request ID."""
-    if has_request_context():
-        if hasattr(g, 'request_id'):
-            delattr(g, 'request_id')
-    else:
-        if hasattr(_request_id_storage, 'request_id'):
-            delattr(_request_id_storage, 'request_id')
-
-def has_request_context():
-    """Check if we're in a Flask request context."""
-    try:
-        return request._get_current_object() is not None
-    except RuntimeError:
-        return False
-
-# Expose request_id as a LocalProxy for easy access
-request_id = LocalProxy(get_request_id)
-
-class RequestIdMiddleware:
-    """
-    Middleware that assigns a unique ID to each request and adds it to
-    the response headers. Also propagates request IDs across service calls.
-    """
-    
-    def __init__(self, app=None, 
-                request_id_header=DEFAULT_REQUEST_ID_HEADER,
-                correlation_id_header=DEFAULT_CORRELATION_ID_HEADER,
-                generate_if_not_found=True):
-        """
-        Initialize the middleware.
-        
-        Args:
-            app: Flask application (optional, can use init_app pattern)
-            request_id_header: Header name for request ID (default: 'X-Request-ID')
-            correlation_id_header: Header name for correlation ID (default: 'X-Correlation-ID')
-            generate_if_not_found: Whether to generate a new ID if none is provided
-        """
-        self.request_id_header = request_id_header
-        self.correlation_id_header = correlation_id_header
-        self.generate_if_not_found = generate_if_not_found
-        
-        if app is not None:
-            self.init_app(app)
-    
-    def init_app(self, app):
-        """
-        Initialize the extension with the Flask app.
-        
-        Args:
-            app: Flask application
-        """
-        # Store settings in config for reference
-        app.config.setdefault('REQUEST_ID_HEADER', self.request_id_header)
-        app.config.setdefault('CORRELATION_ID_HEADER', self.correlation_id_header)
-        app.config.setdefault('GENERATE_REQUEST_ID', self.generate_if_not_found)
-        
-        # Register middleware
-        app.before_request(self._before_request)
-        app.after_request(self._after_request)
-        app.teardown_request(self._teardown_request)
-        
-        # For clarity, expose the current ID as app.request_id
-        app.request_id = request_id
-        
-        # Log configuration
-        logger.debug(f"RequestIdMiddleware initialized with headers: {self.request_id_header}, {self.correlation_id_header}")
-    
-    def _before_request(self):
-        """
-        Extract or generate request ID before each request.
-        """
-        # Look for ID in headers (priority order: correlation ID, request ID)
-        correlation_id = request.headers.get(self.correlation_id_header)
-        incoming_request_id = request.headers.get(self.request_id_header)
-        
-        # Use the first available ID (correlation ID takes precedence)
-        current_id = correlation_id or incoming_request_id
-        
-        # Generate a new ID if needed
-        if not current_id and self.generate_if_not_found:
-            current_id = str(uuid.uuid4())
-            logger.debug(f"Generated new request ID: {current_id}")
-        
-        # Store the ID
-        if current_id:
-            set_request_id(current_id)
-            logger.debug(f"Request ID for {request.path}: {current_id}")
-    
-    def _after_request(self, response):
-        """
-        Add request ID to response headers.
-        
-        Args:
-            response: Flask response object
-            
-        Returns:
-            Flask response object
-        """
-        # Get the current request ID
-        current_id = get_request_id()
-        
-        # Add to response headers if available
-        if current_id:
-            response.headers[self.request_id_header] = current_id
-            response.headers[self.correlation_id_header] = current_id
-        
-        return response
-    
-    def _teardown_request(self, exception=None):
-        """
-        Clean up request ID after the request is complete.
-        
-        Args:
-            exception: Exception that occurred during the request (if any)
-        """
-        clear_request_id()
-
-def get_request_headers_with_id():
-    """
-    Get headers dictionary with the current request ID.
-    Useful for propagating the ID to other services.
+    Get the current correlation ID.
     
     Returns:
-        dict: Headers dictionary with request ID
+        str: Correlation ID from Flask g, or thread-local, or None
     """
-    current_id = get_request_id()
-    headers = {}
+    if has_request_context():
+        return getattr(g, 'correlation_id', None)
     
-    if current_id:
-        # Try to get header names from current app if available
-        if has_request_context() and current_app:
-            request_id_header = current_app.config.get('REQUEST_ID_HEADER', DEFAULT_REQUEST_ID_HEADER)
-            correlation_id_header = current_app.config.get('CORRELATION_ID_HEADER', DEFAULT_CORRELATION_ID_HEADER)
-        else:
-            request_id_header = DEFAULT_REQUEST_ID_HEADER
-            correlation_id_header = DEFAULT_CORRELATION_ID_HEADER
+    return getattr(_request_id_local, 'correlation_id', None)
+
+
+def with_request_id(func):
+    """
+    Decorator that ensures a request ID exists for the decorated function.
+    
+    Args:
+        func: Function to decorate
         
-        # Add headers
-        headers[request_id_header] = current_id
-        headers[correlation_id_header] = current_id
+    Returns:
+        Decorated function
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        # Generate request ID if none exists
+        if not get_request_id():
+            request_id = str(uuid.uuid4())
+            _request_id_local.request_id = request_id
+            _request_id_local.correlation_id = request_id
+            
+            # If in Flask context, store in g
+            if has_request_context():
+                g.request_id = request_id
+                g.correlation_id = request_id
+        
+        # Call original function
+        return func(*args, **kwargs)
     
-    return headers 
+    return wrapper
+
+
+# Module exports
+__all__ = [
+    'RequestIdMiddleware',
+    'get_request_id',
+    'get_correlation_id',
+    'with_request_id'
+] 
 ```
 
 
@@ -21776,6 +22416,24 @@ class VaultSecretManager(SecretManager):
 ```
 
 
+### FILE: backend\shared\utils\__init__.py
+```
+"""
+Shared utilities module for backend services.
+Provides common utilities for HTTP requests, date handling, and more.
+"""
+
+# Import commonly used utilities for easier access
+try:
+    from .http import (
+        get, post, put, delete, patch,
+        make_request, add_request_id_headers
+    )
+except ImportError:
+    pass 
+```
+
+
 ### FILE: backend\shared\utils\data_seeder.py
 ```
 import logging
@@ -21978,113 +22636,223 @@ class DatabaseManager:
 ### FILE: backend\shared\utils\http.py
 ```
 """
-HTTP utilities for making requests with request ID propagation.
+HTTP utility module for making requests with proper request ID propagation.
 """
 
 import logging
 import requests
-from requests.exceptions import RequestException
+from typing import Dict, Any, Optional, Union, List
+import json
+import time
+
+# Try to import request ID functions, with fallbacks if not available
+try:
+    from ..middleware.request_id import get_request_id, get_correlation_id
+except (ImportError, ValueError):
+    # Simple fallback implementations
+    def get_request_id():
+        return None
+        
+    def get_correlation_id():
+        return None
 
 logger = logging.getLogger(__name__)
 
-def request_with_correlation(method, url, **kwargs):
+def add_request_id_headers(headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """
-    Make an HTTP request with the current request ID propagated.
+    Add request ID headers to an existing headers dictionary.
     
     Args:
-        method: HTTP method ('get', 'post', etc.)
-        url: URL to request
-        **kwargs: Additional arguments to pass to requests
+        headers: Existing headers dictionary or None
         
     Returns:
-        requests.Response: Response object
-        
-    Raises:
-        requests.RequestException: If the request fails
+        Headers dictionary with request ID headers added
     """
-    # Import here to avoid circular imports
-    try:
-        from ..middleware.request_id import get_request_headers_with_id
-        # Add request ID headers
-        headers = kwargs.get('headers', {})
-        headers.update(get_request_headers_with_id())
-        kwargs['headers'] = headers
-    except ImportError:
-        logger.debug("Could not import request_id module, not propagating request ID")
+    if headers is None:
+        headers = {}
     
-    # Make the request
-    try:
-        func = getattr(requests, method.lower())
-        response = func(url, **kwargs)
-        return response
-    except RequestException as e:
-        logger.error(f"Request failed: {e}", exc_info=True)
-        raise
+    # Add request ID headers if they exist
+    request_id = get_request_id()
+    if request_id:
+        headers.setdefault('X-Request-ID', request_id)
+    
+    correlation_id = get_correlation_id()
+    if correlation_id:
+        headers.setdefault('X-Correlation-ID', correlation_id)
+    
+    return headers
 
-def get(url, **kwargs):
+def make_request(
+    method: str,
+    url: str,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    json_data: Optional[Dict[str, Any]] = None,
+    data: Optional[Union[Dict[str, Any], str, bytes]] = None,
+    files: Optional[Dict[str, Any]] = None,
+    auth: Optional[Any] = None,
+    timeout: Union[float, tuple] = 10.0,
+    verify: bool = True,
+    cert: Optional[Union[str, tuple]] = None,
+    allow_redirects: bool = True,
+    proxies: Optional[Dict[str, str]] = None,
+    stream: bool = False,
+    retry_count: int = 3,
+    retry_backoff_factor: float = 0.3,
+    retry_status_codes: Optional[List[int]] = None
+) -> requests.Response:
     """
-    Make a GET request with the current request ID propagated.
+    Make an HTTP request with proper request ID propagation and retries.
     
     Args:
+        method: HTTP method (GET, POST, PUT, DELETE, etc.)
         url: URL to request
-        **kwargs: Additional arguments to pass to requests
+        headers: Optional request headers
+        params: Optional URL parameters
+        json_data: Optional JSON data to send
+        data: Optional form data to send
+        files: Optional files to upload
+        auth: Optional authentication tuple or object
+        timeout: Request timeout in seconds (default: 10.0)
+        verify: Whether to verify SSL certificates
+        cert: Optional SSL client certificate
+        allow_redirects: Whether to follow redirects
+        proxies: Optional proxy servers
+        stream: Whether to stream the response
+        retry_count: Number of retries for transient errors
+        retry_backoff_factor: Backoff factor for retries
+        retry_status_codes: Status codes to retry (default: 429, 500, 502, 503, 504)
         
     Returns:
-        requests.Response: Response object
+        Response object
     """
-    return request_with_correlation('get', url, **kwargs)
+    # Add request ID headers
+    headers = add_request_id_headers(headers)
+    
+    # Default retry status codes
+    if retry_status_codes is None:
+        retry_status_codes = [429, 500, 502, 503, 504]
+    
+    # Logging context
+    log_context = {
+        "method": method,
+        "url": url,
+        "service": url.split('/')[2] if '://' in url else url.split('/')[0]
+    }
+    
+    if params:
+        log_context["params"] = params
+    
+    logger.debug(f"Making {method} request to {url}", extra=log_context)
+    
+    # Retry loop
+    last_exception = None
+    for retry in range(retry_count + 1):
+        try:
+            # Starting timer for the request
+            start_time = time.time()
+            
+            # Make the request
+            response = requests.request(
+                method=method.upper(),
+                url=url,
+                headers=headers,
+                params=params,
+                json=json_data,
+                data=data,
+                files=files,
+                auth=auth,
+                timeout=timeout,
+                verify=verify,
+                cert=cert,
+                allow_redirects=allow_redirects,
+                proxies=proxies,
+                stream=stream
+            )
+            
+            # Calculate request duration
+            duration = time.time() - start_time
+            log_context["duration"] = f"{duration:.3f}s"
+            log_context["status_code"] = response.status_code
+            
+            # Check if we should retry based on status code
+            if response.status_code in retry_status_codes and retry < retry_count:
+                logger.warning(
+                    f"Received status {response.status_code} from {url}, retrying ({retry+1}/{retry_count})",
+                    extra=log_context
+                )
+                time.sleep(retry_backoff_factor * (2 ** retry))
+                continue
+            
+            # Log success or non-retryable failure
+            if response.status_code < 400:
+                logger.debug(
+                    f"Successfully called {url} ({response.status_code})",
+                    extra=log_context
+                )
+            else:
+                logger.error(
+                    f"Error calling {url} ({response.status_code}): {response.text[:100]}",
+                    extra=log_context
+                )
+            
+            return response
+            
+        except (requests.RequestException, IOError) as e:
+            last_exception = e
+            if retry < retry_count:
+                logger.warning(
+                    f"Request to {url} failed: {str(e)}, retrying ({retry+1}/{retry_count})",
+                    extra=log_context
+                )
+                time.sleep(retry_backoff_factor * (2 ** retry))
+            else:
+                logger.error(
+                    f"Request to {url} failed after {retry_count} retries: {str(e)}",
+                    extra=log_context
+                )
+    
+    # If we get here, all retries failed
+    if last_exception:
+        raise last_exception
+    
+    # This should never happen, but just in case
+    raise RuntimeError(f"Failed to make request to {url} after {retry_count} retries")
+
+
+# Convenience methods for common HTTP verbs
+def get(url, **kwargs):
+    """Make a GET request."""
+    return make_request("GET", url, **kwargs)
 
 def post(url, **kwargs):
-    """
-    Make a POST request with the current request ID propagated.
-    
-    Args:
-        url: URL to request
-        **kwargs: Additional arguments to pass to requests
-        
-    Returns:
-        requests.Response: Response object
-    """
-    return request_with_correlation('post', url, **kwargs)
+    """Make a POST request."""
+    return make_request("POST", url, **kwargs)
 
 def put(url, **kwargs):
-    """
-    Make a PUT request with the current request ID propagated.
-    
-    Args:
-        url: URL to request
-        **kwargs: Additional arguments to pass to requests
-        
-    Returns:
-        requests.Response: Response object
-    """
-    return request_with_correlation('put', url, **kwargs)
+    """Make a PUT request."""
+    return make_request("PUT", url, **kwargs)
 
 def delete(url, **kwargs):
-    """
-    Make a DELETE request with the current request ID propagated.
-    
-    Args:
-        url: URL to request
-        **kwargs: Additional arguments to pass to requests
-        
-    Returns:
-        requests.Response: Response object
-    """
-    return request_with_correlation('delete', url, **kwargs)
+    """Make a DELETE request."""
+    return make_request("DELETE", url, **kwargs)
 
 def patch(url, **kwargs):
-    """
-    Make a PATCH request with the current request ID propagated.
-    
-    Args:
-        url: URL to request
-        **kwargs: Additional arguments to pass to requests
-        
-    Returns:
-        requests.Response: Response object
-    """
-    return request_with_correlation('patch', url, **kwargs) 
+    """Make a PATCH request."""
+    return make_request("PATCH", url, **kwargs)
+
+
+# Export symbols
+__all__ = [
+    'make_request',
+    'add_request_id_headers',
+    'get',
+    'post',
+    'put',
+    'delete',
+    'patch'
+] 
 ```
 
 
@@ -22295,6 +23063,311 @@ data/
 ```
 
 
+### FILE: frontend\.eslintrc.json
+```
+{
+  "extends": [
+    "next/core-web-vitals",
+    "eslint:recommended",
+    "plugin:react/recommended",
+    "plugin:react-hooks/recommended",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint", "react", "react-hooks"],
+  "rules": {
+    // TypeScript-specific rules
+    "@typescript-eslint/explicit-module-boundary-types": "off",
+    "@typescript-eslint/no-explicit-any": "warn",
+    "@typescript-eslint/no-unused-vars": ["warn", { 
+      "argsIgnorePattern": "^_", 
+      "varsIgnorePattern": "^_" 
+    }],
+    "@typescript-eslint/ban-ts-comment": "warn",
+    
+    // React-specific rules
+    "react/react-in-jsx-scope": "off",
+    "react/prop-types": "off",
+    "react/display-name": "off",
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "warn",
+    
+    // General rules
+    "no-console": ["warn", { "allow": ["warn", "error", "info"] }],
+    "no-debugger": "warn",
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+    "no-var": "error",
+    "prefer-const": "warn",
+    "prefer-template": "warn"
+  },
+  "settings": {
+    "react": {
+      "version": "detect"
+    }
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "**/*.test.tsx", "**/__tests__/**/*"],
+      "env": {
+        "jest": true
+      },
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off"
+      }
+    }
+  ],
+  "env": {
+    "browser": true,
+    "node": true,
+    "es6": true
+  }
+} 
+```
+
+
+### FILE: frontend\DEBUGGING.md
+```
+# Frontend Debugging Guide
+
+This document provides guidance on debugging the Next.js frontend application.
+
+## Environment Setup
+
+Before you begin, ensure that you have the correct environment variables set up. The application uses the following environment variables:
+
+```
+# Required environment variables
+NEXT_PUBLIC_API_URL=http://localhost:5000
+NEXT_PUBLIC_AUTH_URL=http://localhost:5001
+NEXT_PUBLIC_WS_URL=ws://localhost:3001
+NEXT_PUBLIC_APP_NAME=Meeting App
+NEXT_PUBLIC_APP_VERSION=1.0.0
+
+# Optional environment variables
+NEXT_PUBLIC_ENABLE_DEBUG_TOOLS=true  # Enable debug tools (default: true in development, false in production)
+NEXT_PUBLIC_ENABLE_ANALYTICS=false   # Enable analytics (default: false)
+```
+
+## Debugging Tools
+
+### Built-in Debug Overlay
+
+The application includes a built-in debug overlay that can be toggled by pressing `Ctrl+Shift+D` in development mode. The debug overlay provides:
+
+- Current log level control
+- Pending API requests
+- Recent API responses
+- Application state capture
+
+### URL Parameters
+
+You can control certain aspects of the application by adding query parameters to the URL:
+
+- `?log_level=1` - Set log level (0=TRACE, 1=DEBUG, 2=INFO, 3=WARN, 4=ERROR, 5=NONE)
+- `?debug=true` - Force enable debug mode
+
+### Console Logging
+
+The application uses a structured logging system with different log levels:
+
+```typescript
+import logger from '@/utils/logger';
+
+// Different log levels
+logger.trace('Detailed trace information');
+logger.debug('Debugging information');
+logger.info('General information');
+logger.warn('Warning message');
+logger.error('Error message');
+
+// Logging with context
+const componentLogger = createLogger('ComponentName');
+componentLogger.info('Component initialized');
+```
+
+## Browser DevTools
+
+### React Developer Tools
+
+Install the [React Developer Tools](https://chrome.google.com/webstore/detail/react-developer-tools/fmkadmapgofadopljbjfkapdkoienihi) extension for Chrome or Firefox to inspect component props, state, and hierarchy.
+
+### Network Tab
+
+The Network tab in browser DevTools is essential for debugging API requests:
+
+1. Open DevTools (F12 or Ctrl+Shift+I)
+2. Go to the Network tab
+3. Filter by "Fetch/XHR" to see only API requests
+4. Look for the `X-Request-ID` header in requests to correlate with backend logs
+
+### Debugging API Requests
+
+All API requests include a unique `X-Request-ID` header that can be used to trace requests from the frontend to the backend.
+
+Example of manually inspecting an API request:
+
+```typescript
+// Get a reference to the API client
+import { apiClient } from '@/services/api/client';
+
+// Make a request
+const response = await apiClient.get('/api/meetings');
+
+// Check response
+console.log('Response:', response);
+
+// If there was an error
+if (response.error) {
+  console.error('Error:', response.error);
+}
+```
+
+## Error Handling
+
+### Error Boundaries
+
+The application uses React Error Boundaries to catch and display errors gracefully. You can wrap specific components with an error boundary for more granular error handling:
+
+```typescript
+import ErrorBoundary from '@/components/ErrorBoundary';
+
+// In your component
+return (
+  <ErrorBoundary
+    fallback={<div>Something went wrong with this component</div>}
+    onError={(error) => console.error('Component error:', error)}
+  >
+    <YourComponent />
+  </ErrorBoundary>
+);
+```
+
+### Debugging Production Errors
+
+For production debugging, check the browser console for error messages. All unhandled errors are logged and could be sent to an error tracking service.
+
+## Debugging Specific Issues
+
+### State Management Issues
+
+Use the Debug Context to capture and inspect application state:
+
+```typescript
+import { useDebug } from '@/contexts/DebugContext';
+
+function YourComponent() {
+  const { captureState } = useDebug();
+  
+  // Capture state for debugging
+  useEffect(() => {
+    captureState('componentState', { 
+      // Your component state here
+    });
+  }, [captureState, /* your dependencies */]);
+  
+  // ...
+}
+```
+
+### Performance Issues
+
+Use the `why-did-you-render` package to track unnecessary re-renders:
+
+```typescript
+// In your component file
+import React from 'react';
+
+if (process.env.NODE_ENV === 'development') {
+  YourComponent.whyDidYouRender = true;
+}
+
+// Or enable globally for specific components in _app.tsx
+```
+
+### WebSocket Debugging
+
+For WebSocket connection issues:
+
+1. Check the browser console for connection errors
+2. Verify the NEXT_PUBLIC_WS_URL environment variable
+3. Use the Network tab in DevTools, filter by "WS" to see WebSocket connections
+4. Look for the `X-Request-ID` and `X-Correlation-ID` headers in the initial WebSocket handshake
+
+## Running in Debug Mode
+
+To run the application with Node.js inspector for step-by-step debugging:
+
+```bash
+npm run start:debug
+```
+
+Then connect your IDE's debugger or open Chrome DevTools and navigate to chrome://inspect.
+
+## Bundle Analysis
+
+To analyze the bundle size:
+
+```bash
+npm run analyze
+```
+
+This will generate a report showing the size of each bundle and help identify large dependencies.
+
+## TypeScript Type Checking
+
+Run TypeScript type checking:
+
+```bash
+npx tsc --noEmit
+```
+
+## Common Issues and Solutions
+
+1. **API Requests Failing**
+   - Check network tab for status codes
+   - Verify API URL environment variable
+   - Check CORS settings
+   - Look for authentication issues (expired tokens)
+
+2. **Component Not Rendering**
+   - Check if it's wrapped in a conditional that evaluates to false
+   - Verify that parent components are rendering
+   - Check for errors in the console
+
+3. **Slow Performance**
+   - Use React DevTools Profiler to identify slow components
+   - Look for unnecessary re-renders
+   - Check for expensive operations in render functions
+   - Verify that proper memoization is used (useMemo, useCallback)
+
+4. **Authentication Issues**
+   - Check local storage for token expiration
+   - Verify that tokens are being sent with requests
+   - Look for CORS issues with credentials
+
+## Useful Debugging Commands
+
+```javascript
+// In browser console
+
+// Get current environment config
+console.log(window.__NEXT_DATA__.props.pageProps.env);
+
+// Get app state
+console.log(window.__APP_STATE__);
+
+// Force garbage collection (Chrome only, requires --enable-precise-memory-info flag)
+window.gc();
+
+// Check for memory leaks
+performance.memory;
+
+// Monitor events on an element
+monitorEvents(document.querySelector('#your-element-id'));
+``` 
+```
+
+
 ### FILE: frontend\Dockerfile
 ```
 # Build stage
@@ -22370,10 +23443,48 @@ const path = require('path');
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  
+  // Default environment variables
+  env: {
+    // App information
+    NEXT_PUBLIC_APP_NAME: 'Meeting App',
+    NEXT_PUBLIC_APP_VERSION: process.env.NEXT_PUBLIC_APP_VERSION || '1.0.0',
+    
+    // API endpoints with defaults
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000',
+    NEXT_PUBLIC_AUTH_URL: process.env.NEXT_PUBLIC_AUTH_URL || 'http://localhost:5001',
+    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001',
+    
+    // Feature flags
+    NEXT_PUBLIC_ENABLE_ANALYTICS: process.env.NEXT_PUBLIC_ENABLE_ANALYTICS || 'false',
+    NEXT_PUBLIC_ENABLE_DEBUG_TOOLS: process.env.NODE_ENV !== 'production' ? 'true' : (process.env.NEXT_PUBLIC_ENABLE_DEBUG_TOOLS || 'false'),
+    
+    // Timeouts and limits
+    NEXT_PUBLIC_API_TIMEOUT_MS: process.env.NEXT_PUBLIC_API_TIMEOUT_MS || '30000',
+    NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS: process.env.NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS || '5000',
+    NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB: process.env.NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB || '5',
+  },
+  
+  // Images configuration
+  images: {
+    domains: ['localhost'],
+  },
+  
+  // Enable SWC minification
   swcMinify: true,
+  
+  // Output standalone build
   output: 'standalone',
-  webpack: (config) => {
+  
+  // Disable source maps in production
+  productionBrowserSourceMaps: false,
+  
+  // Configure webpack
+  webpack: (config, { dev, isServer }) => {
+    // External dependencies
     config.externals = [...config.externals, { 'simple-peer': 'SimplePeer' }];
+    
+    // Path aliases
     config.resolve = {
       ...config.resolve,
       alias: {
@@ -22381,10 +23492,40 @@ const nextConfig = {
         '@': path.join(__dirname, 'src'),
       },
     };
+    
+    // Example: Add environment variable injection through DefinePlugin
+    // if (dev) {
+    //   const webpack = require('webpack');
+    //   config.plugins.push(
+    //     new webpack.DefinePlugin({
+    //       'process.env.APP_BUILD_TIME': JSON.stringify(new Date().toISOString()),
+    //     })
+    //   );
+    // }
+    
     return config;
   },
+  
+  // Header configurations
   async headers() {
     return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'X-Frame-Options',
+            value: 'DENY',
+          },
+          {
+            key: 'X-XSS-Protection',
+            value: '1; mode=block',
+          },
+        ],
+      },
       {
         source: '/:path*',
         headers: [
@@ -22400,7 +23541,7 @@ const nextConfig = {
         ],
       },
     ];
-  }
+  },
 }
 
 module.exports = nextConfig 
@@ -22417,7 +23558,12 @@ module.exports = nextConfig
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "lint:fix": "next lint --fix",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "analyze": "cross-env ANALYZE=true next build",
+    "start:debug": "cross-env NODE_OPTIONS='--inspect' next dev"
   },
   "dependencies": {
     "next": "^13.4.19",
@@ -22435,23 +23581,25 @@ module.exports = nextConfig
     "simple-peer": "^9.11.1"
   },
   "devDependencies": {
-    "@types/node": "^20.5.1",
+    "@types/node": "^20.10.0",
     "@types/react": "^18.2.20",
     "@types/react-dom": "^18.2.7",
-    "typescript": "^5.1.6",
-    "eslint": "^8.47.0",
     "@types/fabric": "^5.3.7",
-    "@types/node": "^20.10.0",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
     "@types/simple-peer": "^9.11.8",
     "@types/socket.io-client": "^3.0.0",
-    "eslint": "^8.0.0",
-    "eslint-config-next": "14.0.0",
     "typescript": "^5.3.0",
+    "eslint": "^8.47.0",
+    "eslint-config-next": "14.0.0",
     "tailwindcss": "^3.3.5",
     "postcss": "^8.4.31",
-    "autoprefixer": "^10.4.16"
+    "autoprefixer": "^10.4.16",
+    "@typescript-eslint/eslint-plugin": "^6.4.0",
+    "@typescript-eslint/parser": "^6.4.0",
+    "cross-env": "^7.0.3",
+    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "prettier": "^3.0.2",
+    "why-did-you-render": "^7.0.1"
   }
 } 
 ```
@@ -22503,14 +23651,144 @@ module.exports = {
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "baseUrl": ".",
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
+  "include": [
+    "next-env.d.ts", 
+    "src/types/*.d.ts",
+    "**/*.ts", 
+    "**/*.tsx", 
+    ".next/types/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 } 
+```
+
+
+### FILE: frontend\src\components\ErrorBoundary.tsx
+```
+import React, { Component, ErrorInfo, ReactNode } from 'react';
+import logger from '@/utils/logger';
+import { isDevelopment } from '@/config/environment';
+
+interface Props {
+  children: ReactNode;
+  fallback?: ReactNode | ((error: Error, errorInfo: ErrorInfo) => ReactNode);
+  onError?: (error: Error, errorInfo: ErrorInfo) => void;
+}
+
+interface State {
+  hasError: boolean;
+  error?: Error;
+  errorInfo?: ErrorInfo;
+}
+
+/**
+ * Error boundary component to catch JavaScript errors in child component tree.
+ * Displays a fallback UI instead of crashing the whole app.
+ */
+class ErrorBoundary extends Component<Props, State> {
+  constructor(props: Props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): State {
+    // Update state so the next render will show the fallback UI
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    // Capture the error details
+    this.setState({ errorInfo });
+    
+    // Log the error
+    logger.error('Error caught by ErrorBoundary:', error);
+    logger.error('Component stack:', errorInfo.componentStack);
+    
+    // Call the onError callback if provided
+    if (this.props.onError) {
+      this.props.onError(error, errorInfo);
+    }
+    
+    // In development, log to console for easier debugging
+    if (isDevelopment) {
+      console.error('Error caught by ErrorBoundary:', error);
+      console.error('Component stack:', errorInfo.componentStack);
+    }
+  }
+
+  render(): ReactNode {
+    const { hasError, error, errorInfo } = this.state;
+    const { children, fallback } = this.props;
+
+    if (hasError && error) {
+      // Check for custom fallback render function
+      if (typeof fallback === 'function' && errorInfo) {
+        return fallback(error, errorInfo);
+      }
+      
+      // Use provided fallback component
+      if (fallback) {
+        return fallback;
+      }
+      
+      // Default fallback UI
+      return (
+        <div className="error-boundary">
+          <div className="error-container">
+            <h2>Something went wrong</h2>
+            <p className="error-message">{error.message}</p>
+            {isDevelopment && errorInfo && (
+              <details className="error-details">
+                <summary>Component Stack</summary>
+                <pre>{errorInfo.componentStack}</pre>
+              </details>
+            )}
+            <button
+              className="error-reset-button"
+              onClick={() => this.setState({ hasError: false, error: undefined, errorInfo: undefined })}
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // When there's no error, render children
+    return children;
+  }
+}
+
+/**
+ * HOC to wrap a component with an error boundary
+ */
+export function withErrorBoundary<P extends object>(
+  Component: React.ComponentType<P>,
+  errorBoundaryProps?: Omit<Props, 'children'>
+) {
+  const displayName = Component.displayName || Component.name || 'Component';
+  
+  const WrappedComponent = (props: P) => (
+    <ErrorBoundary {...errorBoundaryProps}>
+      <Component {...props} />
+    </ErrorBoundary>
+  );
+  
+  WrappedComponent.displayName = `withErrorBoundary(${displayName})`;
+  
+  return WrappedComponent;
+}
+
+export default ErrorBoundary; 
 ```
 
 
@@ -23114,6 +24392,138 @@ export default function Whiteboard({ roomId }: WhiteboardProps) {
 ```
 
 
+### FILE: frontend\src\config\environment.ts
+```
+/**
+ * Centralized environment configuration.
+ * This module provides consistent access to environment variables
+ * and validates their presence at runtime.
+ */
+
+// Required environment variables that must be defined
+interface RequiredEnvVars {
+  // API URLs
+  NEXT_PUBLIC_API_URL: string;
+  NEXT_PUBLIC_AUTH_URL: string;
+  NEXT_PUBLIC_WS_URL: string;
+  
+  // Other required configs
+  NEXT_PUBLIC_APP_NAME: string;
+  NEXT_PUBLIC_APP_VERSION: string;
+}
+
+// Optional environment variables with defaults
+interface OptionalEnvVars {
+  // Feature flags
+  NEXT_PUBLIC_ENABLE_ANALYTICS: boolean;
+  NEXT_PUBLIC_ENABLE_DEBUG_TOOLS: boolean;
+  
+  // Timeouts and limits
+  NEXT_PUBLIC_API_TIMEOUT_MS: number;
+  NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS: number;
+  NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB: number;
+}
+
+// Environment configuration type
+export type EnvConfig = RequiredEnvVars & OptionalEnvVars;
+
+/**
+ * Get environment variable with type checking
+ */
+function getEnvVar<T>(key: string, defaultValue?: T, parser?: (value: string) => T): T {
+  const value = process.env[key];
+  
+  // Handle undefined values
+  if (value === undefined) {
+    if (defaultValue !== undefined) {
+      return defaultValue;
+    }
+    throw new Error(`Environment variable ${key} is not defined`);
+  }
+  
+  // Parse value if parser is provided
+  if (parser) {
+    try {
+      return parser(value);
+    } catch (error) {
+      console.error(`Failed to parse environment variable ${key}:`, error);
+      if (defaultValue !== undefined) {
+        return defaultValue;
+      }
+      throw new Error(`Failed to parse environment variable ${key}`);
+    }
+  }
+  
+  // Return value as is
+  return value as unknown as T;
+}
+
+/**
+ * Boolean parser for environment variables
+ */
+function parseBoolean(value: string): boolean {
+  return value.toLowerCase() === 'true';
+}
+
+/**
+ * Number parser for environment variables
+ */
+function parseNumber(value: string): number {
+  const parsed = Number(value);
+  if (isNaN(parsed)) {
+    throw new Error(`Value "${value}" cannot be parsed as a number`);
+  }
+  return parsed;
+}
+
+/**
+ * Environment configuration
+ */
+export const env: EnvConfig = {
+  // Required environment variables
+  NEXT_PUBLIC_API_URL: getEnvVar('NEXT_PUBLIC_API_URL'),
+  NEXT_PUBLIC_AUTH_URL: getEnvVar('NEXT_PUBLIC_AUTH_URL'),
+  NEXT_PUBLIC_WS_URL: getEnvVar('NEXT_PUBLIC_WS_URL'),
+  NEXT_PUBLIC_APP_NAME: getEnvVar('NEXT_PUBLIC_APP_NAME'),
+  NEXT_PUBLIC_APP_VERSION: getEnvVar('NEXT_PUBLIC_APP_VERSION'),
+  
+  // Optional environment variables with defaults
+  NEXT_PUBLIC_ENABLE_ANALYTICS: getEnvVar('NEXT_PUBLIC_ENABLE_ANALYTICS', false, parseBoolean),
+  NEXT_PUBLIC_ENABLE_DEBUG_TOOLS: getEnvVar('NEXT_PUBLIC_ENABLE_DEBUG_TOOLS', process.env.NODE_ENV !== 'production', parseBoolean),
+  NEXT_PUBLIC_API_TIMEOUT_MS: getEnvVar('NEXT_PUBLIC_API_TIMEOUT_MS', 30000, parseNumber),
+  NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS: getEnvVar('NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS', 5000, parseNumber),
+  NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB: getEnvVar('NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB', 5, parseNumber),
+};
+
+/**
+ * Check if running in development mode
+ */
+export const isDevelopment = process.env.NODE_ENV === 'development';
+
+/**
+ * Check if running in production mode
+ */
+export const isProduction = process.env.NODE_ENV === 'production';
+
+/**
+ * Check if running in test mode
+ */
+export const isTest = process.env.NODE_ENV === 'test';
+
+/**
+ * Get base URL for the current environment
+ */
+export function getBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    return window.location.origin;
+  }
+  return env.NEXT_PUBLIC_API_URL;
+}
+
+export default env; 
+```
+
+
 ### FILE: frontend\src\contexts\AuthContext.tsx
 ```
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
@@ -23537,6 +24947,456 @@ export function useChat() {
   }
   return context;
 } 
+```
+
+
+### FILE: frontend\src\contexts\DebugContext.tsx
+```
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { env, isDevelopment } from '@/config/environment';
+import logger, { LogLevel, configureLogger } from '@/utils/logger';
+import { getPendingRequests, abortAllRequests } from '@/services/api/client';
+
+// Debug context state
+interface DebugContextState {
+  isDebugEnabled: boolean;
+  toggleDebug: () => void;
+  logLevel: LogLevel;
+  setLogLevel: (level: LogLevel) => void;
+  lastApiResponses: Array<{
+    url: string;
+    method: string;
+    status: number;
+    timestamp: number;
+    duration: number;
+  }>;
+  pendingRequests: Array<{
+    url: string;
+    method: string;
+    timestamp: number;
+    duration: number;
+  }>;
+  appState: Record<string, any>;
+  captureState: (key: string, value: any) => void;
+  clearState: (key?: string) => void;
+  abortAllRequests: () => void;
+}
+
+// Default context value
+const defaultContext: DebugContextState = {
+  isDebugEnabled: false,
+  toggleDebug: () => {},
+  logLevel: LogLevel.INFO,
+  setLogLevel: () => {},
+  lastApiResponses: [],
+  pendingRequests: [],
+  appState: {},
+  captureState: () => {},
+  clearState: () => {},
+  abortAllRequests: () => {},
+};
+
+// Create context
+const DebugContext = createContext<DebugContextState>(defaultContext);
+
+// Maximum number of API responses to store
+const MAX_API_RESPONSES = 100;
+
+/**
+ * Debug context provider component
+ */
+export const DebugProvider: React.FC<{
+  children: React.ReactNode;
+  initialEnabled?: boolean;
+}> = ({ children, initialEnabled = env.NEXT_PUBLIC_ENABLE_DEBUG_TOOLS }) => {
+  // Debug state
+  const [isDebugEnabled, setIsDebugEnabled] = useState<boolean>(
+    isDevelopment && (initialEnabled === true || initialEnabled === 'true')
+  );
+  
+  // Log level state
+  const [logLevel, setLogLevelState] = useState<LogLevel>(
+    isDevelopment ? LogLevel.DEBUG : LogLevel.INFO
+  );
+  
+  // API history state
+  const [lastApiResponses, setLastApiResponses] = useState<Array<{
+    url: string;
+    method: string;
+    status: number;
+    timestamp: number;
+    duration: number;
+  }>>([]);
+  
+  // App state capture
+  const [appState, setAppState] = useState<Record<string, any>>({});
+  
+  // Toggle debug mode
+  const toggleDebug = useCallback(() => {
+    setIsDebugEnabled(prev => !prev);
+  }, []);
+  
+  // Set log level
+  const setLogLevel = useCallback((level: LogLevel) => {
+    setLogLevelState(level);
+    configureLogger({ level });
+    
+    // Log the change
+    logger.info(`Log level set to ${LogLevel[level]}`);
+  }, []);
+  
+  // Capture application state for debugging
+  const captureState = useCallback((key: string, value: any) => {
+    setAppState(prev => ({
+      ...prev,
+      [key]: value,
+      _lastUpdated: Date.now(),
+    }));
+  }, []);
+  
+  // Clear captured state
+  const clearState = useCallback((key?: string) => {
+    if (key) {
+      setAppState(prev => {
+        const newState = { ...prev };
+        delete newState[key];
+        return {
+          ...newState,
+          _lastUpdated: Date.now(),
+        };
+      });
+    } else {
+      setAppState({ _lastUpdated: Date.now() });
+    }
+  }, []);
+  
+  // Get pending requests
+  const [pendingRequests, setPendingRequests] = useState<Array<{
+    url: string;
+    method: string;
+    timestamp: number;
+    duration: number;
+  }>>([]);
+  
+  // Register API response listener
+  useEffect(() => {
+    if (!isDebugEnabled || !isDevelopment) {
+      return;
+    }
+    
+    // Register event listener for API responses
+    const handleApiResponse = (event: CustomEvent) => {
+      const { url, method, status, timestamp, duration } = event.detail;
+      
+      setLastApiResponses(prev => {
+        const newResponses = [
+          { url, method, status, timestamp, duration },
+          ...prev,
+        ].slice(0, MAX_API_RESPONSES);
+        
+        return newResponses;
+      });
+    };
+    
+    // Create custom event for API responses
+    window.addEventListener('api-response', handleApiResponse as EventListener);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener('api-response', handleApiResponse as EventListener);
+    };
+  }, [isDebugEnabled]);
+  
+  // Register keyboard shortcut for debug mode
+  useEffect(() => {
+    if (!isDevelopment) {
+      return;
+    }
+    
+    // Toggle debug mode with Ctrl+Shift+D
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.shiftKey && event.key === 'D') {
+        toggleDebug();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [toggleDebug]);
+  
+  // Update pending requests
+  useEffect(() => {
+    if (!isDebugEnabled || !isDevelopment) {
+      return;
+    }
+    
+    // Poll for pending requests
+    const intervalId = setInterval(() => {
+      const requests = getPendingRequests();
+      const now = Date.now();
+      
+      setPendingRequests(
+        requests.map(req => ({
+          url: req.url,
+          method: req.method,
+          timestamp: req.timestamp,
+          duration: now - req.timestamp,
+        }))
+      );
+    }, 100);
+    
+    // Clean up
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [isDebugEnabled]);
+  
+  // Set initial log level
+  useEffect(() => {
+    configureLogger({ level: logLevel });
+  }, [logLevel]);
+  
+  // Context value
+  const contextValue: DebugContextState = {
+    isDebugEnabled,
+    toggleDebug,
+    logLevel,
+    setLogLevel,
+    lastApiResponses,
+    pendingRequests,
+    appState,
+    captureState,
+    clearState,
+    abortAllRequests,
+  };
+  
+  return (
+    <DebugContext.Provider value={contextValue}>
+      {children}
+      {isDebugEnabled && isDevelopment && (
+        <DebugOverlay />
+      )}
+    </DebugContext.Provider>
+  );
+};
+
+/**
+ * Debug overlay component
+ * Shown when debug mode is enabled
+ */
+const DebugOverlay: React.FC = () => {
+  const [isExpanded, setIsExpanded] = useState<boolean>(false);
+  const { logLevel, setLogLevel, lastApiResponses, pendingRequests, appState } = useContext(DebugContext);
+  
+  // Toggle expanded state
+  const toggleExpanded = () => {
+    setIsExpanded(prev => !prev);
+  };
+  
+  // Format date
+  const formatTime = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString();
+  };
+  
+  // Handle log level change
+  const handleLogLevelChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    setLogLevel(Number(event.target.value) as LogLevel);
+  };
+  
+  // Minimize style
+  if (!isExpanded) {
+    return (
+      <div className="debug-overlay-minimized">
+        <button onClick={toggleExpanded}>📊 Debug</button>
+      </div>
+    );
+  }
+  
+  // Full debug overlay
+  return (
+    <div className="debug-overlay">
+      <div className="debug-header">
+        <h3>Debug Tools</h3>
+        <button onClick={toggleExpanded}>Minimize</button>
+      </div>
+      
+      <div className="debug-content">
+        <div className="debug-section">
+          <h4>Settings</h4>
+          <div className="debug-setting">
+            <label htmlFor="logLevel">Log Level:</label>
+            <select 
+              id="logLevel" 
+              value={logLevel} 
+              onChange={handleLogLevelChange}
+            >
+              <option value={LogLevel.TRACE}>Trace</option>
+              <option value={LogLevel.DEBUG}>Debug</option>
+              <option value={LogLevel.INFO}>Info</option>
+              <option value={LogLevel.WARN}>Warning</option>
+              <option value={LogLevel.ERROR}>Error</option>
+              <option value={LogLevel.NONE}>None</option>
+            </select>
+          </div>
+        </div>
+        
+        <div className="debug-section">
+          <h4>Pending Requests ({pendingRequests.length})</h4>
+          <div className="debug-requests">
+            {pendingRequests.length === 0 ? (
+              <p>No pending requests</p>
+            ) : (
+              <ul>
+                {pendingRequests.map((request, index) => (
+                  <li key={index}>
+                    {request.method} {request.url} 
+                    ({request.duration}ms, started at {formatTime(request.timestamp)})
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+        
+        <div className="debug-section">
+          <h4>Recent API Responses</h4>
+          <div className="debug-responses">
+            {lastApiResponses.length === 0 ? (
+              <p>No API responses yet</p>
+            ) : (
+              <ul>
+                {lastApiResponses.slice(0, 5).map((response, index) => (
+                  <li key={index} className={response.status >= 400 ? 'error' : 'success'}>
+                    {response.method} {response.url} 
+                    ({response.status}, {response.duration}ms, at {formatTime(response.timestamp)})
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+        
+        <div className="debug-section">
+          <h4>Captured State</h4>
+          <div className="debug-state">
+            <pre>{JSON.stringify(appState, null, 2)}</pre>
+          </div>
+        </div>
+      </div>
+      
+      <style jsx>{`
+        .debug-overlay {
+          position: fixed;
+          bottom: 0;
+          right: 0;
+          width: 400px;
+          max-height: 50vh;
+          background-color: rgba(0, 0, 0, 0.8);
+          color: white;
+          border-top-left-radius: 8px;
+          overflow: auto;
+          z-index: 9999;
+          font-family: monospace;
+          font-size: 12px;
+        }
+        
+        .debug-overlay-minimized {
+          position: fixed;
+          bottom: 10px;
+          right: 10px;
+          z-index: 9999;
+        }
+        
+        .debug-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 8px;
+          background-color: #333;
+          border-bottom: 1px solid #555;
+        }
+        
+        .debug-content {
+          padding: 8px;
+        }
+        
+        .debug-section {
+          margin-bottom: 16px;
+        }
+        
+        .debug-section h4 {
+          margin-top: 0;
+          margin-bottom: 8px;
+          border-bottom: 1px solid #555;
+        }
+        
+        .debug-requests, .debug-responses, .debug-state {
+          max-height: 200px;
+          overflow: auto;
+        }
+        
+        ul {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+        }
+        
+        li {
+          padding: 4px 0;
+          border-bottom: 1px solid #444;
+        }
+        
+        li.error {
+          color: #ff6b6b;
+        }
+        
+        li.success {
+          color: #69db7c;
+        }
+        
+        .debug-setting {
+          display: flex;
+          align-items: center;
+          margin-bottom: 8px;
+        }
+        
+        .debug-setting label {
+          margin-right: 8px;
+        }
+        
+        button {
+          background-color: #555;
+          color: white;
+          border: none;
+          padding: 4px 8px;
+          border-radius: 4px;
+          cursor: pointer;
+        }
+        
+        button:hover {
+          background-color: #777;
+        }
+        
+        pre {
+          margin: 0;
+          white-space: pre-wrap;
+        }
+      `}</style>
+    </div>
+  );
+};
+
+/**
+ * Debug context hook
+ */
+export const useDebug = () => useContext(DebugContext);
+
+export default DebugContext; 
 ```
 
 
@@ -24213,20 +26073,197 @@ export function useWhiteboard() {
 
 ### FILE: frontend\src\pages\_app.tsx
 ```
+import React from 'react';
 import type { AppProps } from 'next/app';
-import { GoogleOAuthProvider } from '@react-oauth/google';
-import { AuthProvider } from '@/contexts/AuthContext';
+import Head from 'next/head';
+import ErrorBoundary from '@/components/ErrorBoundary';
+import { DebugProvider } from '@/contexts/DebugContext';
+import logger from '@/utils/logger';
+import { env, isDevelopment } from '@/config/environment';
 import '@/styles/globals.css';
 
-export default function App({ Component, pageProps }: AppProps) {
+// Report unhandled promise rejections
+if (typeof window !== 'undefined') {
+  window.addEventListener('unhandledrejection', (event) => {
+    logger.error('Unhandled Promise Rejection:', event.reason);
+    
+    // Track with analytics or error reporting service
+    // if (!isDevelopment) {
+    //   // Example: send to error tracking service
+    //   // errorTrackingService.captureException(event.reason);
+    // }
+  });
+  
+  // Report uncaught errors
+  window.addEventListener('error', (event) => {
+    logger.error('Uncaught Error:', event.error || event.message);
+    
+    // Track with analytics or error reporting service
+    // if (!isDevelopment) {
+    //   // Example: send to error tracking service
+    //   // errorTrackingService.captureException(event.error);
+    // }
+  });
+}
+
+// Custom error handler for error boundary
+const handleError = (error: Error) => {
+  logger.error('Error caught by root ErrorBoundary:', error);
+  
+  // Track with analytics or error reporting service
+  // if (!isDevelopment) {
+  //   // Example: send to error tracking service
+  //   // errorTrackingService.captureException(error);
+  // }
+};
+
+function MyApp({ Component, pageProps }: AppProps) {
+  // Log when app renders (helpful for debugging during refreshes/navigation)
+  React.useEffect(() => {
+    logger.debug(`App rendered at ${new Date().toISOString()}`);
+  }, []);
+  
   return (
-    <GoogleOAuthProvider clientId={process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!}>
-      <AuthProvider>
-        <Component {...pageProps} />
-      </AuthProvider>
-    </GoogleOAuthProvider>
+    <>
+      <Head>
+        <title>{env.NEXT_PUBLIC_APP_NAME}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="description" content="A comprehensive meeting management application" />
+      </Head>
+      
+      <DebugProvider>
+        <ErrorBoundary onError={handleError}>
+          <Component {...pageProps} />
+        </ErrorBoundary>
+      </DebugProvider>
+    </>
   );
-} 
+}
+
+export default MyApp; 
+```
+
+
+### FILE: frontend\src\pages\_error.tsx
+```
+import React from 'react';
+import { NextPage } from 'next';
+import Head from 'next/head';
+import Link from 'next/link';
+import { useRouter } from 'next/router';
+import logger from '@/utils/logger';
+
+interface ErrorProps {
+  statusCode?: number;
+  message?: string;
+  hasGetInitialPropsRun?: boolean;
+  err?: Error;
+}
+
+/**
+ * Custom Next.js error page that handles both 404s and other error codes.
+ */
+const ErrorPage: NextPage<ErrorProps> = ({ statusCode, message, hasGetInitialPropsRun, err }) => {
+  const router = useRouter();
+  
+  // Log the error when component mounts
+  React.useEffect(() => {
+    // Only log if we have an actual error (skip 404s for non-existent routes)
+    if (statusCode && statusCode !== 404) {
+      logger.error(`Error page displayed with status: ${statusCode}, URL: ${router.asPath}`);
+      
+      if (err) {
+        logger.error('Error details:', err);
+      }
+    }
+  }, [statusCode, err, router.asPath]);
+
+  // Handle 404 errors
+  if (statusCode === 404) {
+    return (
+      <>
+        <Head>
+          <title>Page Not Found | Meeting App</title>
+        </Head>
+        <div className="error-page not-found">
+          <div className="error-container">
+            <h1>404</h1>
+            <h2>Page Not Found</h2>
+            <p>Sorry, we couldn't find the page you're looking for.</p>
+            <div className="error-actions">
+              <Link href="/" className="btn btn-primary">
+                Go to Home
+              </Link>
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => router.back()}
+              >
+                Go Back
+              </button>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // Handle other errors
+  return (
+    <>
+      <Head>
+        <title>Error | Meeting App</title>
+      </Head>
+      <div className="error-page">
+        <div className="error-container">
+          <h1>{statusCode || 'Error'}</h1>
+          <h2>Something went wrong</h2>
+          <p>{message || 'An unexpected error occurred'}</p>
+          
+          {process.env.NODE_ENV === 'development' && err && (
+            <details className="error-details">
+              <summary>Error Details</summary>
+              <pre>{err.message}</pre>
+              <pre>{err.stack}</pre>
+            </details>
+          )}
+          
+          <div className="error-actions">
+            <Link href="/" className="btn btn-primary">
+              Go to Home
+            </Link>
+            <button 
+              className="btn btn-secondary" 
+              onClick={() => router.reload()}
+            >
+              Reload Page
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// This gets called on server-side errors
+ErrorPage.getInitialProps = async ({ res, err, asPath }) => {
+  const errorInitialProps: ErrorProps = {
+    hasGetInitialPropsRun: true,
+    statusCode: res?.statusCode || (err ? 500 : 404),
+  };
+  
+  // Keep the original error for debugging in development
+  if (process.env.NODE_ENV === 'development' && err) {
+    errorInitialProps.err = err;
+    errorInitialProps.message = err.message;
+    
+    // Log the error on the server side
+    console.error(`Server-side error occurred on ${asPath}:`, err);
+  }
+  
+  return errorInitialProps;
+};
+
+export default ErrorPage; 
 ```
 
 
@@ -25652,6 +27689,375 @@ export default function VerifyEmail() {
 ```
 
 
+### FILE: frontend\src\services\api\client.ts
+```
+/**
+ * API client with interceptors for debugging and error tracking.
+ * Provides a standardized way to make API requests with automatic error handling.
+ */
+
+import { env, isDevelopment } from '@/config/environment';
+import logger from '@/utils/logger';
+
+// Request options type
+export interface ApiRequestOptions extends RequestInit {
+  params?: Record<string, string | number | boolean | undefined>;
+  timeout?: number;
+}
+
+// Response type
+export interface ApiResponse<T = any> {
+  data: T;
+  status: number;
+  statusText: string;
+  headers: Headers;
+  error?: Error;
+}
+
+// Request tracking
+interface PendingRequest {
+  timestamp: number;
+  url: string;
+  method: string;
+  abortController: AbortController;
+}
+
+// Global request tracking for debugging
+const pendingRequests: PendingRequest[] = [];
+
+/**
+ * Creates a query string from params object
+ */
+function createQueryString(params?: Record<string, string | number | boolean | undefined>): string {
+  if (!params) return '';
+  
+  const queryParams = new URLSearchParams();
+  
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined) {
+      queryParams.append(key, String(value));
+    }
+  });
+  
+  const queryString = queryParams.toString();
+  return queryString ? `?${queryString}` : '';
+}
+
+/**
+ * Adds request ID header to requests
+ */
+function addRequestId(headers: Headers): Headers {
+  // Generate a unique request ID if not already present
+  if (!headers.has('X-Request-ID')) {
+    headers.set('X-Request-ID', `frontend-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`);
+  }
+  
+  return headers;
+}
+
+/**
+ * Formats the API URL based on the environment
+ */
+function formatUrl(path: string): string {
+  // If the path is already a full URL, return it as is
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  
+  // Remove leading slash if present
+  const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+  
+  // Combine API URL with path
+  return `${env.NEXT_PUBLIC_API_URL}/${cleanPath}`;
+}
+
+/**
+ * Fetch API with timeout and automatic error handling
+ */
+async function fetchWithTimeout(
+  url: string, 
+  options: ApiRequestOptions = {}
+): Promise<Response> {
+  const { timeout = env.NEXT_PUBLIC_API_TIMEOUT_MS, ...fetchOptions } = options;
+  
+  // Create abort controller for timeout
+  const controller = new AbortController();
+  const signal = controller.signal;
+  
+  // Set up timeout
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeout);
+  
+  try {
+    // Track request for debugging
+    const pendingRequest: PendingRequest = {
+      timestamp: Date.now(),
+      url,
+      method: options.method || 'GET',
+      abortController: controller
+    };
+    
+    pendingRequests.push(pendingRequest);
+    
+    // Make the request
+    const response = await fetch(url, {
+      ...fetchOptions,
+      signal,
+    });
+    
+    return response;
+  } finally {
+    // Clean up timeout and pending request
+    clearTimeout(timeoutId);
+    
+    // Remove from pending requests
+    const index = pendingRequests.findIndex(req => 
+      req.url === url && req.abortController === controller
+    );
+    
+    if (index !== -1) {
+      pendingRequests.splice(index, 1);
+    }
+  }
+}
+
+/**
+ * Make an API request with standardized error handling and logging
+ */
+export async function apiRequest<T = any>(
+  path: string,
+  options: ApiRequestOptions = {}
+): Promise<ApiResponse<T>> {
+  const startTime = performance.now();
+  
+  // Create a headers object to extract request ID if present
+  const headersObj = new Headers(options.headers || {});
+  const requestId = headersObj.get('X-Request-ID') || `req-${Date.now()}`;
+  
+  // Prepare request
+  const { params, ...fetchOptions } = options;
+  
+  // Create URL with query parameters
+  const queryString = createQueryString(params);
+  const url = `${formatUrl(path)}${queryString}`;
+  
+  // Prepare headers with request ID
+  const headers = new Headers(options.headers || {});
+  addRequestId(headers);
+  
+  // Log request in development
+  if (isDevelopment) {
+    logger.debug(`API Request [${requestId}]: ${options.method || 'GET'} ${url}`);
+    if (options.body) {
+      try {
+        let bodyContent = options.body;
+        if (typeof bodyContent === 'string') {
+          bodyContent = JSON.parse(bodyContent);
+        }
+        logger.debug(`Request body [${requestId}]:`, bodyContent);
+      } catch (e) {
+        // Ignore parsing errors for non-JSON bodies
+      }
+    }
+  }
+  
+  try {
+    // Make the request
+    const response = await fetchWithTimeout(url, {
+      ...fetchOptions,
+      headers,
+    });
+    
+    // Parse response data (handle different content types)
+    let data: T;
+    const contentType = response.headers.get('content-type');
+    
+    if (contentType?.includes('application/json')) {
+      data = await response.json();
+    } else if (contentType?.includes('text/')) {
+      data = await response.text() as unknown as T;
+    } else {
+      // Handle binary data or other formats
+      data = await response.blob() as unknown as T;
+    }
+    
+    // Calculate request time
+    const endTime = performance.now();
+    const requestTime = endTime - startTime;
+    
+    // Log response in development
+    if (isDevelopment) {
+      logger.debug(
+        `API Response [${requestId}]: ${response.status} ${response.statusText} (${requestTime.toFixed(2)}ms)`
+      );
+      logger.debug(`Response data [${requestId}]:`, data);
+    }
+    
+    // Check if response is an error
+    if (!response.ok) {
+      // Format error for consistent handling
+      const error = new Error(
+        `API Error ${response.status}: ${response.statusText}`
+      );
+      
+      // Add response data to error object for more details
+      Object.assign(error, { response, data });
+      
+      // Log error
+      logger.error(`API Error [${requestId}]: ${response.status} ${url}`, error);
+      
+      return {
+        data,
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        error,
+      };
+    }
+    
+    // Return successful response
+    return {
+      data,
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    };
+  } catch (error) {
+    // Handle fetch errors (network, timeout, etc.)
+    const apiError = error instanceof Error ? error : new Error(String(error));
+    
+    // Log error
+    logger.error(`API Request Failed [${requestId}]: ${url}`, apiError);
+    
+    // Return error response
+    return {
+      data: null as unknown as T,
+      status: apiError.name === 'AbortError' ? 408 : 0,
+      statusText: apiError.name === 'AbortError' ? 'Request Timeout' : 'Network Error',
+      headers: new Headers(),
+      error: apiError,
+    };
+  }
+}
+
+/**
+ * Helper for GET requests
+ */
+export function get<T = any>(
+  path: string, 
+  options: Omit<ApiRequestOptions, 'method' | 'body'> = {}
+): Promise<ApiResponse<T>> {
+  return apiRequest<T>(path, { ...options, method: 'GET' });
+}
+
+/**
+ * Helper for POST requests
+ */
+export function post<T = any>(
+  path: string, 
+  data?: any, 
+  options: Omit<ApiRequestOptions, 'method' | 'body'> = {}
+): Promise<ApiResponse<T>> {
+  const headers = new Headers(options.headers || {});
+  if (data && !(data instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+  
+  return apiRequest<T>(path, {
+    ...options,
+    method: 'POST',
+    headers,
+    body: data instanceof FormData ? data : data ? JSON.stringify(data) : undefined,
+  });
+}
+
+/**
+ * Helper for PUT requests
+ */
+export function put<T = any>(
+  path: string, 
+  data?: any, 
+  options: Omit<ApiRequestOptions, 'method' | 'body'> = {}
+): Promise<ApiResponse<T>> {
+  const headers = new Headers(options.headers || {});
+  if (data && !(data instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+  
+  return apiRequest<T>(path, {
+    ...options,
+    method: 'PUT',
+    headers,
+    body: data instanceof FormData ? data : data ? JSON.stringify(data) : undefined,
+  });
+}
+
+/**
+ * Helper for DELETE requests
+ */
+export function del<T = any>(
+  path: string, 
+  options: Omit<ApiRequestOptions, 'method'> = {}
+): Promise<ApiResponse<T>> {
+  return apiRequest<T>(path, { ...options, method: 'DELETE' });
+}
+
+/**
+ * Helper for PATCH requests
+ */
+export function patch<T = any>(
+  path: string, 
+  data?: any, 
+  options: Omit<ApiRequestOptions, 'method' | 'body'> = {}
+): Promise<ApiResponse<T>> {
+  const headers = new Headers(options.headers || {});
+  if (data && !(data instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+  
+  return apiRequest<T>(path, {
+    ...options,
+    method: 'PATCH',
+    headers,
+    body: data instanceof FormData ? data : data ? JSON.stringify(data) : undefined,
+  });
+}
+
+/**
+ * Debug utility to get all pending requests
+ */
+export function getPendingRequests(): PendingRequest[] {
+  return [...pendingRequests];
+}
+
+/**
+ * Debug utility to abort all pending requests
+ */
+export function abortAllRequests(): void {
+  pendingRequests.forEach(request => {
+    request.abortController.abort();
+  });
+}
+
+/**
+ * Export API client with all methods
+ */
+export const apiClient = {
+  request: apiRequest,
+  get,
+  post,
+  put,
+  delete: del,
+  patch,
+  getPendingRequests,
+  abortAllRequests,
+};
+
+export default apiClient; 
+```
+
+
 ### FILE: frontend\src\styles\globals.css
 ```
 @tailwind base;
@@ -25697,6 +28103,35 @@ export type FormSubmitEvent = FormEvent<HTMLFormElement>;
 ```
 
 
+### FILE: frontend\src\types\globals.d.ts
+```
+/**
+ * Global declarations for the application.
+ * This file provides type definitions for globals that may not be properly recognized.
+ */
+
+// Declare process.env for TypeScript
+declare namespace NodeJS {
+  interface ProcessEnv {
+    NODE_ENV: 'development' | 'production' | 'test';
+    NEXT_PUBLIC_API_URL: string;
+    NEXT_PUBLIC_AUTH_URL: string;
+    NEXT_PUBLIC_WS_URL: string;
+    NEXT_PUBLIC_APP_NAME: string;
+    NEXT_PUBLIC_APP_VERSION: string;
+    NEXT_PUBLIC_ENABLE_ANALYTICS?: string;
+    NEXT_PUBLIC_ENABLE_DEBUG_TOOLS?: string;
+    NEXT_PUBLIC_API_TIMEOUT_MS?: string;
+    NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS?: string;
+    NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB?: string;
+  }
+}
+
+// Make sure TypeScript knows process exists globally
+declare const process: NodeJS.Process; 
+```
+
+
 ### FILE: frontend\src\types\jsx.d.ts
 ```
 import React from 'react';
@@ -25720,6 +28155,208 @@ export interface User {
   created_at: string;
   updated_at: string;
 } 
+```
+
+
+### FILE: frontend\src\utils\logger.ts
+```
+/**
+ * Logger utility for consistent logging across the application.
+ * Provides different log levels and structured log format.
+ */
+
+import { env, isDevelopment } from '@/config/environment';
+
+// Log levels
+export enum LogLevel {
+  TRACE = 0,
+  DEBUG = 1,
+  INFO = 2,
+  WARN = 3,
+  ERROR = 4,
+  NONE = 5,
+}
+
+// Logger configuration
+interface LoggerConfig {
+  level: LogLevel;
+  enableConsole: boolean;
+  prefix?: string;
+  includeTimestamp: boolean;
+}
+
+// Default configuration
+const defaultConfig: LoggerConfig = {
+  level: isDevelopment ? LogLevel.DEBUG : LogLevel.INFO,
+  enableConsole: true,
+  includeTimestamp: true,
+};
+
+// Current logger configuration
+let currentConfig: LoggerConfig = { ...defaultConfig };
+
+/**
+ * Set logger configuration
+ */
+export function configureLogger(config: Partial<LoggerConfig>): void {
+  currentConfig = { ...currentConfig, ...config };
+}
+
+/**
+ * Format log message with timestamp and prefix
+ */
+function formatLogMessage(message: string, level: string): string {
+  const parts: string[] = [];
+  
+  // Add timestamp
+  if (currentConfig.includeTimestamp) {
+    parts.push(`[${new Date().toISOString()}]`);
+  }
+  
+  // Add log level
+  parts.push(`[${level}]`);
+  
+  // Add prefix if available
+  if (currentConfig.prefix) {
+    parts.push(`[${currentConfig.prefix}]`);
+  }
+  
+  // Add message
+  parts.push(message);
+  
+  return parts.join(' ');
+}
+
+/**
+ * Create console method with structured format
+ */
+function createLogMethod(
+  level: LogLevel,
+  methodName: 'log' | 'info' | 'debug' | 'warn' | 'error',
+  levelName: string
+) {
+  return function(...args: any[]): void {
+    // Skip if log level is too low
+    if (level < currentConfig.level) {
+      return;
+    }
+    
+    // Skip if console logging is disabled
+    if (!currentConfig.enableConsole) {
+      return;
+    }
+    
+    // Get message
+    const message = args.map(arg => {
+      if (typeof arg === 'object') {
+        try {
+          return JSON.stringify(arg);
+        } catch (e) {
+          return String(arg);
+        }
+      }
+      return String(arg);
+    }).join(' ');
+    
+    // Format message
+    const formattedMessage = formatLogMessage(message, levelName);
+    
+    // Log to console
+    console[methodName](formattedMessage);
+    
+    // Send to remote logging service if in production
+    if (!isDevelopment && level >= LogLevel.ERROR) {
+      // Here you would integrate with a service like Sentry
+      // if (typeof window !== 'undefined' && window.Sentry) {
+      //   window.Sentry.captureMessage(message, levelName.toLowerCase());
+      // }
+    }
+  };
+}
+
+/**
+ * Create debug context with custom prefix
+ */
+export function createLogger(prefix: string): Logger {
+  return {
+    trace: (...args: any[]) => {
+      const prevPrefix = currentConfig.prefix;
+      currentConfig.prefix = prefix;
+      trace(...args);
+      currentConfig.prefix = prevPrefix;
+    },
+    debug: (...args: any[]) => {
+      const prevPrefix = currentConfig.prefix;
+      currentConfig.prefix = prefix;
+      debug(...args);
+      currentConfig.prefix = prevPrefix;
+    },
+    info: (...args: any[]) => {
+      const prevPrefix = currentConfig.prefix;
+      currentConfig.prefix = prefix;
+      info(...args);
+      currentConfig.prefix = prevPrefix;
+    },
+    warn: (...args: any[]) => {
+      const prevPrefix = currentConfig.prefix;
+      currentConfig.prefix = prefix;
+      warn(...args);
+      currentConfig.prefix = prevPrefix;
+    },
+    error: (...args: any[]) => {
+      const prevPrefix = currentConfig.prefix;
+      currentConfig.prefix = prefix;
+      error(...args);
+      currentConfig.prefix = prevPrefix;
+    },
+  };
+}
+
+// Logger interface
+export interface Logger {
+  trace: (...args: any[]) => void;
+  debug: (...args: any[]) => void;
+  info: (...args: any[]) => void;
+  warn: (...args: any[]) => void;
+  error: (...args: any[]) => void;
+}
+
+// Create log methods
+export const trace = createLogMethod(LogLevel.TRACE, 'debug', 'TRACE');
+export const debug = createLogMethod(LogLevel.DEBUG, 'debug', 'DEBUG');
+export const info = createLogMethod(LogLevel.INFO, 'info', 'INFO');
+export const warn = createLogMethod(LogLevel.WARN, 'warn', 'WARN');
+export const error = createLogMethod(LogLevel.ERROR, 'error', 'ERROR');
+
+// Default logger
+const logger: Logger = {
+  trace,
+  debug,
+  info,
+  warn,
+  error,
+};
+
+// Initialize logger
+if (typeof window !== 'undefined') {
+  // Set log level from URL params for debugging
+  const params = new URLSearchParams(window.location.search);
+  const logLevel = params.get('log_level');
+  if (logLevel) {
+    const level = parseInt(logLevel, 10);
+    if (!isNaN(level) && level >= 0 && level <= 5) {
+      configureLogger({ level: level as LogLevel });
+      debug(`Log level set to ${LogLevel[level]}`);
+    }
+  }
+  
+  // Log app initialization
+  info(
+    `App initialized: ${env.NEXT_PUBLIC_APP_NAME} ${env.NEXT_PUBLIC_APP_VERSION} - ${window.location.href}`
+  );
+}
+
+export default logger; 
 ```
 
 
@@ -27803,7 +30440,7 @@ scrape_configs:
 
 
 ## SUMMARY
-- Total files found: 225
-- Files processed: 194
+- Total files found: 239
+- Files processed: 208
 - Files skipped: 31
 - Script version: 1.1.0
