@@ -39,21 +39,25 @@ const nextConfig = {
   env: {
     // App information
     NEXT_PUBLIC_APP_NAME: 'Meeting App',
-    NEXT_PUBLIC_APP_VERSION: process.env.NEXT_PUBLIC_APP_VERSION || '1.0.0',
+    NEXT_PUBLIC_APP_VERSION: '1.0.0',
     
     // API endpoints with defaults
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000',
-    NEXT_PUBLIC_AUTH_URL: process.env.NEXT_PUBLIC_AUTH_URL || 'http://localhost:5001',
-    NEXT_PUBLIC_WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001',
+    NEXT_PUBLIC_API_URL: 'http://localhost:5000',
+    NEXT_PUBLIC_AUTH_URL: 'http://localhost:5001',
+    NEXT_PUBLIC_WS_URL: 'ws://localhost:3001',
+    NEXT_PUBLIC_BASE_URL: 'http://localhost:3000',
     
     // Feature flags
-    NEXT_PUBLIC_ENABLE_ANALYTICS: process.env.NEXT_PUBLIC_ENABLE_ANALYTICS || 'false',
-    NEXT_PUBLIC_ENABLE_DEBUG_TOOLS: process.env.NODE_ENV !== 'production' ? 'true' : (process.env.NEXT_PUBLIC_ENABLE_DEBUG_TOOLS || 'false'),
+    NEXT_PUBLIC_ENABLE_ANALYTICS: 'false',
+    NEXT_PUBLIC_ENABLE_DEBUG_TOOLS: process.env.NODE_ENV !== 'production' ? 'true' : 'false',
     
     // Timeouts and limits
-    NEXT_PUBLIC_API_TIMEOUT_MS: process.env.NEXT_PUBLIC_API_TIMEOUT_MS || '30000',
-    NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS: process.env.NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS || '5000',
-    NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB: process.env.NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB || '5',
+    NEXT_PUBLIC_API_TIMEOUT_MS: '30000',
+    NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS: '5000',
+    NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB: '5',
+    
+    // Google OAuth
+    NEXT_PUBLIC_GOOGLE_CLIENT_ID: '1004556025731-dgnou2c5vdui47ffbfievlil9ncqsrue.apps.googleusercontent.com',
   },
   
   // Images configuration

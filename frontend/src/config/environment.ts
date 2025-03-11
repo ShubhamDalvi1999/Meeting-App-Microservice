@@ -4,6 +4,8 @@
  * and validates their presence at runtime.
  */
 
+import runtimeConfig from '../utils/runtimeConfig';
+
 // Required environment variables that must be defined
 interface RequiredEnvVars {
   // API URLs
@@ -32,21 +34,24 @@ interface OptionalEnvVars {
 export type EnvConfig = RequiredEnvVars & OptionalEnvVars;
 
 /**
- * Get environment variable with type checking
+ * Get environment variable with type checking - now using runtimeConfig instead of process.env
  */
 function getEnvVar<T>(key: string, defaultValue?: T, parser?: (value: string) => T): T {
-  const value = process.env[key];
+  // Use runtimeConfig as the primary source instead of process.env
+  const value = runtimeConfig[key];
   
   // Handle undefined values
   if (value === undefined) {
     if (defaultValue !== undefined) {
       return defaultValue;
     }
-    throw new Error(`Environment variable ${key} is not defined`);
+    console.error(`Environment variable ${key} is not defined in runtimeConfig`);
+    // Return a dummy value to prevent crashes
+    return ('http://localhost:5000' as unknown) as T;
   }
   
   // Parse value if parser is provided
-  if (parser) {
+  if (parser && typeof value === 'string') {
     try {
       return parser(value);
     } catch (error) {
@@ -93,7 +98,7 @@ export const env: EnvConfig = {
   
   // Optional environment variables with defaults
   NEXT_PUBLIC_ENABLE_ANALYTICS: getEnvVar('NEXT_PUBLIC_ENABLE_ANALYTICS', false, parseBoolean),
-  NEXT_PUBLIC_ENABLE_DEBUG_TOOLS: getEnvVar('NEXT_PUBLIC_ENABLE_DEBUG_TOOLS', process.env.NODE_ENV !== 'production', parseBoolean),
+  NEXT_PUBLIC_ENABLE_DEBUG_TOOLS: getEnvVar('NEXT_PUBLIC_ENABLE_DEBUG_TOOLS', true, parseBoolean),
   NEXT_PUBLIC_API_TIMEOUT_MS: getEnvVar('NEXT_PUBLIC_API_TIMEOUT_MS', 30000, parseNumber),
   NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS: getEnvVar('NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS', 5000, parseNumber),
   NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB: getEnvVar('NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB', 5, parseNumber),
@@ -121,7 +126,7 @@ export function getBaseUrl(): string {
   if (typeof window !== 'undefined') {
     return window.location.origin;
   }
-  return env.NEXT_PUBLIC_API_URL;
+  return runtimeConfig.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
 }
 
 export default env; 

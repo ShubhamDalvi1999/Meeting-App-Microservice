@@ -85,10 +85,12 @@ def scrape_project(project_path, output_file, ignore_extensions=None, ignore_dir
     if ignore_dirs is None:
         ignore_dirs = ['.git', 'node_modules', '__pycache__', 'venv', 'env', 
                       '.venv', '.env', 'dist', 'build', 'target', 'bin', 'obj',
-                      '.idea', '.vscode', 'data', 'logs', 'temp', 'cache', 'backup', 'docs', 'test', 'tests', 'tests', '.coverage_html']
+                      '.idea', '.vscode', 'data', 'logs', 'temp', 'cache', 'backup', 
+                      'docs', 'test', 'tests', 'tests', '.coverage_html']
     
     if ignore_patterns is None:
-        ignore_patterns = ['*/.coverage_html/*', '*/login/backend/flask-service/.coverage_html/*']
+        ignore_patterns = ['*/.coverage_html/*', '*/login/backend/flask-service/.coverage_html/*',
+                           'client_secret_1004556025731-dgnou2c5vdui47ffbfievlil9ncqsrue.apps.googleusercontent.com.json']
     
     # Add patterns to ignore context and temp files
     ignore_patterns.extend(["*_context*.txt", "*_output*.txt", "*.context", "project_contents*.txt"])

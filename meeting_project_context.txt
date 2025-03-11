@@ -7,6 +7,8 @@
 📄 IMPLEMENTATION_REPORT.md
 📄 README.md
 📄 TROUBLESHOOTING.md
+📄 backend_logs.txt
+📄 custom_auth_dockerfile
 📄 docker-compose.test.yml
 📄 docker-compose.yml
 📄 migrate.ps1
@@ -181,6 +183,8 @@
   📄 secrets.production
 📁 frontend/
   📄 .dockerignore
+  📄 .env.local
+  📄 .env.production
   📄 .eslintrc.json
   📄 DEBUGGING.md
   📄 Dockerfile
@@ -214,6 +218,7 @@
     📁 pages/
       📄 _app.tsx
       📄 _error.tsx
+      📄 config.js
       📄 dashboard.tsx
       📄 forgot-password.tsx
       📄 index.tsx
@@ -241,51 +246,7 @@
       📄 user.ts
     📁 utils/
       📄 logger.ts
-📁 k8s/
-  📄 flask-backend-deployment.yaml
-  📄 hpa.yaml
-  📄 ingress.yaml
-  📄 node-backend-deployment.yaml
-  📄 postgres-deployment.yaml
-  📄 secrets.yaml
-  📁 config/
-    📁 development/
-      📄 configmap.yaml
-      📄 deployment.yaml
-      📄 frontend-deployment.yaml
-      📄 ingress.yaml
-      📄 network-policies.yaml
-      📄 postgres.yaml
-      📄 redis.yaml
-      📄 secrets.yaml
-      📄 volumes.yaml
-  📁 logging/
-    📄 elasticsearch-deployment.yaml
-    📄 filebeat-daemonset.yaml
-    📄 logstash-deployment.yaml
-  📁 monitoring/
-    📄 grafana-deployment.yaml
-    📄 prometheus-config.yaml
-    📄 prometheus-deployment.yaml
-  📁 network-policies/
-    📄 flask-backend-policy.yaml
-    📄 frontend-policy.yaml
-    📄 logging-policy.yaml
-    📄 monitoring-policy.yaml
-    📄 node-backend-policy.yaml
-    📄 postgres-policy.yaml
-    📄 redis-policy.yaml
-  📁 scripts/
-    📄 backup-restore.sh
-    📄 cleanup.sh
-    📄 deploy-all.sh
-    📄 deploy-logging.sh
-    📄 deploy-monitoring.sh
-    📄 manage-certs.sh
-    📄 manage-secrets.sh
-    📄 monitor-debug.sh
-    📄 scale.sh
-    📄 update-rollback.sh
+      📄 runtimeConfig.ts
 📁 meeting_shared/
   📄 README.md
   📄 __init__.py
@@ -319,6 +280,7 @@
     📄 sampling.py
   📁 utils/
     📄 __init__.py
+    📄 database.py
 📁 monitoring/
   📁 grafana/
     📁 provisioning/
@@ -386,7 +348,7 @@ docs/
 # pytest cache
 .pytest_cache/
 
-
+client_secret_1004556025731-dgnou2c5vdui47ffbfievlil9ncqsrue.apps.googleusercontent.com.json
 ```
 
 
@@ -1090,6 +1052,83 @@ If you're still experiencing issues:
 ```
 
 
+### FILE: backend_logs.txt (SKIPPED - Binary file)
+
+
+### FILE: custom_auth_dockerfile
+```
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create necessary directories
+RUN mkdir -p /app/meeting_shared/schemas /app/src /app/logs
+
+# Copy requirements first to leverage Docker cache
+COPY backend/auth-service/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create the fixed base.py with BaseSchema class
+RUN echo '"""
+Base schemas for API responses.
+"""
+
+from typing import Optional, Dict, Any
+from pydantic import BaseModel
+
+class BaseSchema(BaseModel):
+    """Base schema that all other schemas should inherit from."""
+    class Config:
+        orm_mode = True
+        validate_assignment = True
+        arbitrary_types_allowed = True
+        extra = "forbid"
+
+class ErrorResponse(BaseModel):
+    """Standard error response model."""
+    error: str
+    message: str
+    details: Optional[Dict[str, Any]] = None 
+
+class SuccessResponse(BaseModel):
+    """Standard success response model."""
+    success: bool = True
+    data: Optional[Dict[str, Any]] = {}
+    message: Optional[str] = "Operation completed successfully"
+' > /app/meeting_shared/schemas/base.py
+
+# Create __init__.py in schemas directory
+RUN echo '' > /app/meeting_shared/schemas/__init__.py
+
+# Set environment variables
+ENV PYTHONPATH=/app/src:/app/meeting_shared
+ENV FLASK_APP=src/app.py
+ENV FLASK_ENV=development
+ENV SERVICE_TYPE=auth
+
+# Create entrypoint script
+COPY backend/auth-service/scripts/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:5001/health || exit 1
+
+EXPOSE 5001
+
+# Use entrypoint script
+ENTRYPOINT ["/entrypoint.sh"] 
+```
+
+
 ### FILE: docker-compose.test.yml
 ```
 # yaml-language-server: $schema=https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json
@@ -1248,6 +1287,8 @@ services:
       - SMTP_USERNAME=${SMTP_USERNAME}
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - FRONTEND_URL=${FRONTEND_URL}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - PYTHONPATH=/app/src:/app/meeting_shared
     volumes:
       - ./meeting_shared:/app/meeting_shared
@@ -1334,17 +1375,36 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+        - NEXT_PUBLIC_AUTH_URL=${NEXT_PUBLIC_AUTH_URL}
+        - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
+        - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
+        - NEXT_PUBLIC_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+        - NEXT_PUBLIC_APP_NAME="Meeting App"
+        - NEXT_PUBLIC_APP_VERSION=1.0.0
+        - NEXT_PUBLIC_ENABLE_ANALYTICS=false
+        - NEXT_PUBLIC_ENABLE_DEBUG_TOOLS=false
+        - NEXT_PUBLIC_API_TIMEOUT_MS=30000
+        - NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS=5000
+        - NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB=5
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
       - PORT=3000
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
       - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
       - NEXT_PUBLIC_AUTH_URL=${NEXT_PUBLIC_AUTH_URL}
       - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
-    volumes:
-      - frontend_data:/app
-      - frontend_node_modules:/app/node_modules
-      - frontend_next:/app/.next
+      - NEXT_PUBLIC_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - NEXT_PUBLIC_APP_NAME="Meeting App"
+      - NEXT_PUBLIC_APP_VERSION=1.0.0
+      - NEXT_PUBLIC_ENABLE_ANALYTICS=false
+      - NEXT_PUBLIC_ENABLE_DEBUG_TOOLS=false
+      - NEXT_PUBLIC_API_TIMEOUT_MS=30000
+      - NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS=5000
+      - NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB=5
+      - HOST=0.0.0.0
+    command: node server.js
     ports:
       - "3000:3000"
     depends_on:
@@ -3383,8 +3443,8 @@ from pathlib import Path
 
 # Try to import shared modules
 try:
-    from backend.shared.logging import configure_logging, get_logger
-    from backend.shared.middleware.request_id import RequestIdMiddleware
+    from meeting_shared.shared_logging import configure_logging, get_logger
+    from meeting_shared.middleware.request_id import RequestIdMiddleware
     SHARED_MODULES_AVAILABLE = True
 except ImportError:
     SHARED_MODULES_AVAILABLE = False
@@ -4148,12 +4208,12 @@ from datetime import datetime
 from flask import Blueprint, jsonify, current_app, request, g
 
 from .config import get_config
+from meeting_shared.middleware.request_id import get_request_id
 
 logger = logging.getLogger(__name__)
 
 # Try to import request ID functionality
 try:
-    from backend.shared.middleware.request_id import get_request_id
     HAS_REQUEST_ID = True
 except ImportError:
     HAS_REQUEST_ID = False
@@ -5780,6 +5840,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from contextlib import contextmanager
 import logging
 
+# Define TypeVar T for return type annotations
+T = TypeVar('T')
+
 # Import from shared modules if available, otherwise use local implementation
 from meeting_shared.database import db, transaction
 
@@ -7051,14 +7114,14 @@ echo "Postgres is up - executing command"
 # Print directory structure for debugging
 echo "Directory structure in /app:"
 ls -la /app
-echo "Directory structure in /app/shared:"
-ls -la /app/shared
+echo "Directory structure in /app/meeting_shared:"
+ls -la /app/meeting_shared
 echo "Directory structure in /app/src:"
 ls -la /app/src
 
 # Set Python path
-echo "Setting PYTHONPATH to: /app:/app/shared"
-export PYTHONPATH=/app:/app/shared
+echo "Setting PYTHONPATH to: /app:/app/meeting_shared"
+export PYTHONPATH=/app:/app/meeting_shared
 echo "Environment variables:"
 env | grep -E 'FLASK|DATABASE|REDIS|JWT|SERVICE|AUTH|POSTGRES|PYTHONPATH'
 
@@ -7090,7 +7153,7 @@ logger.info(f"Initial sys.path: {sys.path}")
 
 # Ensure necessary paths are in sys.path
 sys.path.insert(0, '/app')
-sys.path.insert(0, '/app/shared')
+sys.path.insert(0, '/app/meeting_shared')
 logger.info(f"Updated sys.path: {sys.path}")
 
 # Log environment variables
@@ -7212,22 +7275,22 @@ logger.info(f"Updated sys.path: {sys.path}")
 try:
     # Try absolute import first (when PYTHONPATH includes shared)
     logger.info("Attempting to import shared modules using absolute import...")
-    from shared.database import db, init_db
-    from shared.middleware.error_handler import handle_api_errors
-    from shared.middleware.validation import validate_schema
-    from shared.middleware.rate_limiter import RateLimiter
-    from shared.config import config
+    from meeting_shared.database import db, init_db
+    from meeting_shared.middleware.error_handler import handle_api_errors
+    from meeting_shared.middleware.validation import validate_schema
+    from meeting_shared.middleware.rate_limiter import RateLimiter
+    from meeting_shared.config import config
     logger.info("Successfully imported shared modules using absolute import")
 except ImportError as e:
     logger.warning(f"Absolute import failed: {e}, trying relative import")
     try:
         # Fallback to relative path
         logger.info("Attempting to import shared modules using relative import...")
-        from backend.shared.database import db, init_db
-        from backend.shared.middleware.error_handler import handle_api_errors
-        from backend.shared.middleware.validation import validate_schema
-        from backend.shared.middleware.rate_limiter import RateLimiter
-        from backend.shared.config import config
+        from meeting_shared.database import db, init_db
+        from meeting_shared.middleware.error_handler import handle_api_errors
+        from meeting_shared.middleware.validation import validate_schema
+        from meeting_shared.middleware.rate_limiter import RateLimiter
+        from meeting_shared.config import config
         logger.info("Successfully imported shared modules using relative import")
     except ImportError as e:
         logger.error(f"All import approaches failed: {e}")
@@ -8900,9 +8963,6 @@ def create_app(config_name=None):
     app.db = db   # Also store it on the app for easy access
     logger.info("Database initialized")
     
-    # Register blueprints
-    app.register_blueprint(health_bp)
-    
     # Register error handlers
     try:
         from .core.errors import register_error_handlers
@@ -9233,8 +9293,8 @@ from pathlib import Path
 
 # Try to import shared modules
 try:
-    from backend.shared.logging import configure_logging, get_logger
-    from backend.shared.middleware.request_id import RequestIdMiddleware, get_request_id
+    from meeting_shared.shared_logging import configure_logging, get_logger
+    from meeting_shared.middleware.request_id import RequestIdMiddleware, get_request_id
     SHARED_MODULES_AVAILABLE = True
 except ImportError:
     SHARED_MODULES_AVAILABLE = False
@@ -19923,6 +19983,42 @@ data/
 ```
 
 
+### FILE: frontend\.env.local
+```
+NEXT_PUBLIC_API_URL=http://localhost:5000
+NEXT_PUBLIC_AUTH_URL=http://localhost:5001
+NEXT_PUBLIC_WS_URL=ws://localhost:3001
+NEXT_PUBLIC_APP_NAME="Meeting App"
+NEXT_PUBLIC_APP_VERSION=1.0.0
+NEXT_PUBLIC_ENABLE_ANALYTICS=false
+NEXT_PUBLIC_ENABLE_DEBUG_TOOLS=false
+NEXT_PUBLIC_API_TIMEOUT_MS=30000
+NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS=5000
+NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB=5
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=1004556025731-dgnou2c5vdui47ffbfievlil9ncqsrue.apps.googleusercontent.com
+
+```
+
+
+### FILE: frontend\.env.production
+```
+NEXT_PUBLIC_API_URL=http://localhost:5000
+NEXT_PUBLIC_AUTH_URL=http://localhost:5001
+NEXT_PUBLIC_WS_URL=ws://localhost:3001
+NEXT_PUBLIC_APP_NAME="Meeting App"
+NEXT_PUBLIC_APP_VERSION=1.0.0
+NEXT_PUBLIC_ENABLE_ANALYTICS=false
+NEXT_PUBLIC_ENABLE_DEBUG_TOOLS=false
+NEXT_PUBLIC_API_TIMEOUT_MS=30000
+NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS=5000
+NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB=5
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=1004556025731-dgnou2c5vdui47ffbfievlil9ncqsrue.apps.googleusercontent.com
+
+```
+
+
 ### FILE: frontend\.eslintrc.json
 ```
 {
@@ -20187,17 +20283,33 @@ FROM node:18-slim AS builder
 
 WORKDIR /app
 
+# Define build arguments for environment variables
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_AUTH_URL
+ARG NEXT_PUBLIC_WS_URL
+ARG NEXT_PUBLIC_APP_NAME
+ARG NEXT_PUBLIC_APP_VERSION
+ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
+ARG NEXT_PUBLIC_BASE_URL
+ARG NEXT_PUBLIC_ENABLE_ANALYTICS
+ARG NEXT_PUBLIC_ENABLE_DEBUG_TOOLS
+ARG NEXT_PUBLIC_API_TIMEOUT_MS
+ARG NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS
+ARG NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB
+
 # Set environment variables for build
-ENV NEXT_PUBLIC_API_URL=http://localhost:5000
-ENV NEXT_PUBLIC_AUTH_URL=http://localhost:5001
-ENV NEXT_PUBLIC_WS_URL=ws://localhost:3001
-ENV NEXT_PUBLIC_APP_NAME="Meeting App"
-ENV NEXT_PUBLIC_APP_VERSION=1.0.0
-ENV NEXT_PUBLIC_ENABLE_ANALYTICS=false
-ENV NEXT_PUBLIC_ENABLE_DEBUG_TOOLS=false
-ENV NEXT_PUBLIC_API_TIMEOUT_MS=30000
-ENV NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS=5000
-ENV NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB=5
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_AUTH_URL=${NEXT_PUBLIC_AUTH_URL}
+ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
+ENV NEXT_PUBLIC_APP_NAME=${NEXT_PUBLIC_APP_NAME}
+ENV NEXT_PUBLIC_APP_VERSION=${NEXT_PUBLIC_APP_VERSION}
+ENV NEXT_PUBLIC_ENABLE_ANALYTICS=${NEXT_PUBLIC_ENABLE_ANALYTICS}
+ENV NEXT_PUBLIC_ENABLE_DEBUG_TOOLS=${NEXT_PUBLIC_ENABLE_DEBUG_TOOLS}
+ENV NEXT_PUBLIC_API_TIMEOUT_MS=${NEXT_PUBLIC_API_TIMEOUT_MS}
+ENV NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS=${NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS}
+ENV NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB=${NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB}
+ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_CLIENT_ID}
+ENV NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
 
 # Copy package files
 COPY package*.json ./
@@ -20224,12 +20336,36 @@ FROM node:18-slim AS runner
 
 WORKDIR /app
 
+# Define build arguments for environment variables
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_AUTH_URL
+ARG NEXT_PUBLIC_WS_URL
+ARG NEXT_PUBLIC_APP_NAME
+ARG NEXT_PUBLIC_APP_VERSION
+ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID
+ARG NEXT_PUBLIC_BASE_URL
+ARG NEXT_PUBLIC_ENABLE_ANALYTICS
+ARG NEXT_PUBLIC_ENABLE_DEBUG_TOOLS
+ARG NEXT_PUBLIC_API_TIMEOUT_MS
+ARG NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS
+ARG NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB
+
 # Set environment variables
 ENV NODE_ENV=production
 ENV PORT=3000
-ENV NEXT_PUBLIC_API_URL=http://localhost:5000
-ENV NEXT_PUBLIC_AUTH_URL=http://localhost:5001
-ENV NEXT_PUBLIC_WS_URL=ws://localhost:3001
+ENV HOST=0.0.0.0
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_AUTH_URL=${NEXT_PUBLIC_AUTH_URL}
+ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL}
+ENV NEXT_PUBLIC_APP_NAME=${NEXT_PUBLIC_APP_NAME}
+ENV NEXT_PUBLIC_APP_VERSION=${NEXT_PUBLIC_APP_VERSION}
+ENV NEXT_PUBLIC_ENABLE_ANALYTICS=${NEXT_PUBLIC_ENABLE_ANALYTICS}
+ENV NEXT_PUBLIC_ENABLE_DEBUG_TOOLS=${NEXT_PUBLIC_ENABLE_DEBUG_TOOLS}
+ENV NEXT_PUBLIC_API_TIMEOUT_MS=${NEXT_PUBLIC_API_TIMEOUT_MS}
+ENV NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS=${NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS}
+ENV NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB=${NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB}
+ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_CLIENT_ID}
+ENV NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
 
 # Create public directory if it doesn't exist
 RUN mkdir -p public
@@ -20237,9 +20373,8 @@ RUN mkdir -p public
 # Copy necessary files from builder
 COPY --from=builder /app/next.config.js ./
 COPY --from=builder /app/public/ ./public/
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
 
 # Expose port
 EXPOSE 3000
@@ -20248,8 +20383,8 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3000/api/health || exit 1
 
-# Start the application - updated to use standalone server
-CMD ["node", ".next/standalone/server.js"] 
+# Start the application with explicit host binding
+CMD ["node", "server.js"] 
 ```
 
 
@@ -20290,9 +20425,17 @@ const nextConfig = {
   
   // Disable static generation and export
   output: 'standalone',
+  
+  // Configure to avoid static generation issues
   experimental: {
-    // Disable static generation
-    disableStaticGeneration: true,
+    // Turn off static optimization for pages that use getServerSideProps
+    serverComponents: false
+  },
+  
+  // Server options to ensure binding to all network interfaces
+  serverRuntimeConfig: {
+    // Will only be available on the server side
+    hostname: '0.0.0.0',
   },
   
   // Default environment variables
@@ -21495,7 +21638,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const googleLogin = async (token: string) => {
     try {
       setError(null);
-      const response = await fetch('http://localhost:5001/auth/google/login', {
+      const response = await fetch(`${AUTH_API_URL}/auth/google/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token })
@@ -22917,8 +23060,10 @@ export function useWhiteboard() {
 import React from 'react';
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { DebugProvider } from '@/contexts/DebugContext';
+import { AuthProvider } from '@/contexts/AuthContext';
 import logger from '@/utils/logger';
 import { env, isDevelopment } from '@/config/environment';
 import '@/styles/globals.css';
@@ -22974,7 +23119,11 @@ function MyApp({ Component, pageProps }: AppProps) {
       
       <DebugProvider>
         <ErrorBoundary onError={handleError}>
-          <Component {...pageProps} />
+          <GoogleOAuthProvider clientId={process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ''}>
+            <AuthProvider>
+              <Component {...pageProps} />
+            </AuthProvider>
+          </GoogleOAuthProvider>
         </ErrorBoundary>
       </DebugProvider>
     </>
@@ -23105,6 +23254,21 @@ ErrorPage.getInitialProps = async ({ res, err, asPath }) => {
 };
 
 export default ErrorPage; 
+```
+
+
+### FILE: frontend\src\pages\config.js
+```
+// This file disables static generation for all pages
+export const config = {
+  unstable_runtimeJS: true,
+  unstable_JsPreload: false
+}
+
+// Export a dummy function to make this a valid module
+export default function Config() {
+  return null;
+} 
 ```
 
 
@@ -23605,10 +23769,15 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
+    console.log('Index page mounted, redirecting to /login');
     router.replace('/login');
   }, []);
 
-  return null;
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <p>Redirecting to login...</p>
+    </div>
+  );
 } 
 ```
 
@@ -25201,3776 +25370,79 @@ export default logger;
 ```
 
 
-### FILE: k8s\flask-backend-deployment.yaml
+### FILE: frontend\src\utils\runtimeConfig.ts
 ```
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: flask-backend
-  labels:
-    app: flask-backend
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: flask-backend
-  template:
-    metadata:
-      labels:
-        app: flask-backend
-    spec:
-      containers:
-      - name: flask-backend
-        image: meeting-app-flask-backend:latest
-        imagePullPolicy: Never
-        ports:
-        - containerPort: 5000
-        env:
-        - name: FLASK_ENV
-          value: "production"
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: db-credentials
-              key: database-url
-        - name: SECRET_KEY
-          valueFrom:
-            secretKeyRef:
-              name: app-secrets
-              key: secret-key
-        resources:
-          limits:
-            cpu: "500m"
-            memory: "512Mi"
-          requests:
-            cpu: "200m"
-            memory: "256Mi"
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 5000
-          initialDelaySeconds: 10
-          periodSeconds: 5
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 5000
-          initialDelaySeconds: 15
-          periodSeconds: 10
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: flask-backend
-spec:
-  type: ClusterIP
-  ports:
-  - port: 5000
-    targetPort: 5000
-    protocol: TCP
-  selector:
-    app: flask-backend 
-```
+/**
+ * Runtime configuration for client-side environment variables.
+ * This approach ensures environment variables are available in the browser.
+ */
 
-
-### FILE: k8s\hpa.yaml
-```
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: frontend-hpa
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: frontend
-  minReplicas: 2
-  maxReplicas: 5
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-  - type: Resource
-    resource:
-      name: memory
-      target:
-        type: Utilization
-        averageUtilization: 80
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: flask-backend-hpa
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: flask-backend
-  minReplicas: 3
-  maxReplicas: 6
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-  - type: Resource
-    resource:
-      name: memory
-      target:
-        type: Utilization
-        averageUtilization: 80
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: node-backend-hpa
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: node-backend
-  minReplicas: 3
-  maxReplicas: 6
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
-  - type: Resource
-    resource:
-      name: memory
-      target:
-        type: Utilization
-        averageUtilization: 80 
-```
-
-
-### FILE: k8s\ingress.yaml
-```
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: meeting-app-ingress
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
-    nginx.ingress.kubernetes.io/websocket-services: "node-backend"
-    nginx.ingress.kubernetes.io/enable-cors: "true"
-    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS"
-    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      more_set_headers "Access-Control-Allow-Origin: $http_origin";
-spec:
-  rules:
-  - http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: frontend
-            port:
-              number: 3000
-      - path: /api
-        pathType: Prefix
-        backend:
-          service:
-            name: flask-backend
-            port:
-              number: 5000
-      - path: /ws
-        pathType: Prefix
-        backend:
-          service:
-            name: node-backend
-            port:
-              number: 3001 
-```
-
-
-### FILE: k8s\node-backend-deployment.yaml
-```
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: node-backend
-  labels:
-    app: node-backend
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: node-backend
-  template:
-    metadata:
-      labels:
-        app: node-backend
-    spec:
-      containers:
-      - name: node-backend
-        image: meeting-app-node-backend:latest
-        imagePullPolicy: Never
-        ports:
-        - containerPort: 3001
-        env:
-        - name: NODE_ENV
-          value: "production"
-        - name: WS_PORT
-          value: "3001"
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: db-credentials
-              key: database-url
-        - name: SECRET_KEY
-          valueFrom:
-            secretKeyRef:
-              name: app-secrets
-              key: secret-key
-        resources:
-          limits:
-            cpu: "500m"
-            memory: "512Mi"
-          requests:
-            cpu: "200m"
-            memory: "256Mi"
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 3001
-          initialDelaySeconds: 10
-          periodSeconds: 5
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 3001
-          initialDelaySeconds: 15
-          periodSeconds: 10
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: node-backend
-spec:
-  type: ClusterIP
-  ports:
-  - port: 3001
-    targetPort: 3001
-    protocol: TCP
-  selector:
-    app: node-backend 
-```
-
-
-### FILE: k8s\postgres-deployment.yaml
-```
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: postgres
-  labels:
-    app: postgres
-spec:
-  serviceName: postgres
-  replicas: 1
-  selector:
-    matchLabels:
-      app: postgres
-  template:
-    metadata:
-      labels:
-        app: postgres
-    spec:
-      containers:
-      - name: postgres
-        image: postgres:13-alpine
-        ports:
-        - containerPort: 5432
-        env:
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: db-credentials
-              key: username
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: db-credentials
-              key: password
-        - name: POSTGRES_DB
-          value: "meetingapp"
-        resources:
-          limits:
-            cpu: "1000m"
-            memory: "1Gi"
-          requests:
-            cpu: "500m"
-            memory: "512Mi"
-        volumeMounts:
-        - name: postgres-data
-          mountPath: /var/lib/postgresql/data
-        readinessProbe:
-          exec:
-            command: ["pg_isready", "-U", "postgres"]
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        livenessProbe:
-          exec:
-            command: ["pg_isready", "-U", "postgres"]
-          initialDelaySeconds: 30
-          periodSeconds: 20
-  volumeClaimTemplates:
-  - metadata:
-      name: postgres-data
-    spec:
-      accessModes: ["ReadWriteOnce"]
-      resources:
-        requests:
-          storage: 10Gi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: postgres
-spec:
-  type: ClusterIP
-  ports:
-  - port: 5432
-    targetPort: 5432
-    protocol: TCP
-  selector:
-    app: postgres 
-```
-
-
-### FILE: k8s\secrets.yaml
-```
-apiVersion: v1
-kind: Secret
-metadata:
-  name: db-credentials
-type: Opaque
-data:
-  username: cG9zdGdyZXM=  # postgres
-  password: cG9zdGdyZXM=  # postgres
-  database-url: cG9zdGdyZXNxbDovL3Bvc3RncmVzOnBvc3RncmVzQHBvc3RncmVzOjU0MzIvbWVldGluZ2FwcA==  # postgresql://postgres:postgres@postgres:5432/meetingapp
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: app-secrets
-type: Opaque
-data:
-  secret-key: eW91ci1zZWNyZXQta2V5LWhlcmU=  # your-secret-key-here 
-```
-
-
-### FILE: k8s\config\development\configmap.yaml
-```
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: meeting-app-config
-  namespace: meeting-app
-data:
-  # Frontend environment variables
-  NEXT_PUBLIC_API_URL: "http://localhost:30963"
-  NEXT_PUBLIC_WS_URL: "ws://localhost:30283"
-  NEXT_PUBLIC_BASE_URL: "http://localhost:30000"
+export interface RuntimeConfig {
+  // API URLs
+  NEXT_PUBLIC_API_URL: string;
+  NEXT_PUBLIC_AUTH_URL: string;
+  NEXT_PUBLIC_WS_URL: string;
+  NEXT_PUBLIC_BASE_URL: string;
   
-  # Backend environment variables
-  FLASK_ENV: "development"
-  FLASK_APP: "app.py"
-  API_HOST: "0.0.0.0"
-  API_PORT: "5000"
-  WS_HOST: "0.0.0.0"
-  WS_PORT: "3001"
+  // App information
+  NEXT_PUBLIC_APP_NAME: string;
+  NEXT_PUBLIC_APP_VERSION: string;
   
-  # CORS Configuration
-  CORS_ORIGINS: "http://localhost:30000,http://meeting-app.local,http://localhost:3000"
+  // Feature flags
+  NEXT_PUBLIC_ENABLE_ANALYTICS: boolean;
+  NEXT_PUBLIC_ENABLE_DEBUG_TOOLS: boolean;
   
-  # JWT Configuration
-  JWT_EXPIRY_DAYS: "1"
+  // Timeouts and limits
+  NEXT_PUBLIC_API_TIMEOUT_MS: number;
+  NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS: number;
+  NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB: number;
   
-  # Database configurations
-  POSTGRES_DB: "meetingapp"
-  POSTGRES_USER: "dev_user"
-  POSTGRES_HOST: "postgres-db"
-  POSTGRES_PORT: "5432"
-  DATABASE_URL: "postgresql://dev_user:dev-password-123@postgres-db:5432/meetingapp"
+  // OAuth
+  NEXT_PUBLIC_GOOGLE_CLIENT_ID: string;
   
-  # Redis configuration
-  REDIS_URL: "redis://:dev-redis-123@redis-cache:6379/0"
-  REDIS_HOST: "redis-cache"
-  REDIS_PORT: "6379"
+  // Allow indexing with string
+  [key: string]: string | number | boolean;
+}
+
+const runtimeConfig: RuntimeConfig = {
+  // API URLs
+  NEXT_PUBLIC_API_URL: 'http://localhost:5000',
+  NEXT_PUBLIC_AUTH_URL: 'http://localhost:5001',
+  NEXT_PUBLIC_WS_URL: 'ws://localhost:3001',
+  NEXT_PUBLIC_BASE_URL: 'http://localhost:3000',
   
-  # Logging
-  LOG_LEVEL: "debug" 
-```
+  // App information
+  NEXT_PUBLIC_APP_NAME: 'Meeting App',
+  NEXT_PUBLIC_APP_VERSION: '1.0.0',
+  
+  // Feature flags
+  NEXT_PUBLIC_ENABLE_ANALYTICS: false,
+  NEXT_PUBLIC_ENABLE_DEBUG_TOOLS: false,
+  
+  // Timeouts and limits
+  NEXT_PUBLIC_API_TIMEOUT_MS: 30000,
+  NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS: 5000,
+  NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB: 5,
+  
+  // OAuth
+  NEXT_PUBLIC_GOOGLE_CLIENT_ID: '1004556025731-dgnou2c5vdui47ffbfievlil9ncqsrue.apps.googleusercontent.com',
+};
 
-
-### FILE: k8s\config\development\deployment.yaml
-```
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: meeting-backend
-  namespace: meeting-app
-  labels:
-    app: meeting-backend
-    component: api
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: meeting-backend
-  template:
-    metadata:
-      labels:
-        app: meeting-backend
-    spec:
-      initContainers:
-      - name: init-db-check
-        image: postgres:15-alpine
-        command: ['sh', '-c', 'until pg_isready -h postgres-db -p 5432 -U $POSTGRES_USER; do echo waiting for database; sleep 2; done;']
-        env:
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: meeting-app-secrets
-              key: POSTGRES_USER
-      - name: init-redis-check
-        image: redis:7-alpine
-        command: ['sh', '-c', 'until redis-cli -h redis-cache -a "$REDIS_PASSWORD" ping; do echo waiting for redis; sleep 2; done;']
-        env:
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: meeting-app-secrets
-              key: REDIS_PASSWORD
-      - name: init-db-migrate
-        image: meeting-app-backend:dev
-        workingDir: /app
-        command: ['python', '-c', 'import os; os.environ["FLASK_APP"] = "app.py"; os.environ["FLASK_NO_MIGRATE"] = "0"; from app import app; from flask_migrate import upgrade; with app.app_context(): upgrade()']
-        envFrom:
-        - configMapRef:
-            name: meeting-app-config
-        - secretRef:
-            name: meeting-app-secrets
-      containers:
-      - name: api-server
-        image: meeting-app-backend:dev
-        imagePullPolicy: Never
-        ports:
-        - containerPort: 5000
-          name: http-api
-        envFrom:
-        - configMapRef:
-            name: meeting-app-config
-        - secretRef:
-            name: meeting-app-secrets
-        resources:
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: http-api
-          initialDelaySeconds: 10
-          periodSeconds: 5
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: http-api
-          initialDelaySeconds: 15
-          periodSeconds: 20
-        volumeMounts:
-        - name: tmp-data
-          mountPath: /tmp
-      - name: websocket-server
-        image: meeting-app-websocket:dev
-        imagePullPolicy: Never
-        ports:
-        - containerPort: 3001
-          name: ws-api
-        envFrom:
-        - configMapRef:
-            name: meeting-app-config
-        - secretRef:
-            name: meeting-app-secrets
-        resources:
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: ws-api
-          initialDelaySeconds: 10
-          periodSeconds: 5
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: ws-api
-          initialDelaySeconds: 15
-          periodSeconds: 20
-      volumes:
-      - name: tmp-data
-        emptyDir: {}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: meeting-backend-internal
-  namespace: meeting-app
-  labels:
-    app: meeting-backend
-    type: internal
-spec:
-  selector:
-    app: meeting-backend
-  ports:
-  - name: http-api
-    port: 5000
-    targetPort: http-api
-  - name: ws-api
-    port: 3001
-    targetPort: ws-api
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: meeting-backend-external
-  namespace: meeting-app
-  labels:
-    app: meeting-backend
-    type: external
-spec:
-  type: NodePort
-  selector:
-    app: meeting-backend
-  ports:
-  - name: http-api
-    port: 5000
-    targetPort: http-api
-    nodePort: 30963
-  - name: ws-api
-    port: 3001
-    targetPort: ws-api
-    nodePort: 30283 
-```
-
-
-### FILE: k8s\config\development\frontend-deployment.yaml
-```
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: meeting-frontend
-  namespace: meeting-app
-  labels:
-    app: meeting-frontend
-    component: web
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: meeting-frontend
-  template:
-    metadata:
-      labels:
-        app: meeting-frontend
-    spec:
-      initContainers:
-      - name: init-backend-check
-        image: curlimages/curl:8.4.0
-        command: ['sh', '-c', 'until curl -f ${NEXT_PUBLIC_API_URL}/health; do echo waiting for backend api; sleep 2; done;']
-        env:
-        - name: NEXT_PUBLIC_API_URL
-          valueFrom:
-            configMapKeyRef:
-              name: meeting-app-config
-              key: NEXT_PUBLIC_API_URL
-      containers:
-      - name: web-server
-        image: meeting-app-frontend:dev
-        imagePullPolicy: Never
-        ports:
-        - containerPort: 3000
-          name: http-web
-        env:
-        - name: NODE_ENV
-          value: "development"
-        - name: NEXT_PUBLIC_API_URL
-          valueFrom:
-            configMapKeyRef:
-              name: meeting-app-config
-              key: NEXT_PUBLIC_API_URL
-        - name: NEXT_PUBLIC_WS_URL
-          valueFrom:
-            configMapKeyRef:
-              name: meeting-app-config
-              key: NEXT_PUBLIC_WS_URL
-        - name: NEXT_PUBLIC_BASE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: meeting-app-config
-              key: NEXT_PUBLIC_BASE_URL
-        resources:
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-        readinessProbe:
-          httpGet:
-            path: /api/health
-            port: http-web
-          initialDelaySeconds: 10
-          periodSeconds: 5
-          timeoutSeconds: 2
-        livenessProbe:
-          httpGet:
-            path: /api/health
-            port: http-web
-          initialDelaySeconds: 15
-          periodSeconds: 20
-          timeoutSeconds: 2
-        volumeMounts:
-        - name: tmp-data
-          mountPath: /tmp
-        - name: next-cache
-          mountPath: /app/.next/cache
-      volumes:
-      - name: tmp-data
-        emptyDir: {}
-      - name: next-cache
-        emptyDir: {}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: meeting-frontend-internal
-  namespace: meeting-app
-  labels:
-    app: meeting-frontend
-    type: internal
-spec:
-  selector:
-    app: meeting-frontend
-  ports:
-  - name: http-web
-    port: 3000
-    targetPort: http-web
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: meeting-frontend-external
-  namespace: meeting-app
-  labels:
-    app: meeting-frontend
-    type: external
-spec:
-  type: NodePort
-  selector:
-    app: meeting-frontend
-  ports:
-  - name: http-web
-    port: 3000
-    targetPort: http-web
-    nodePort: 30000 
-```
-
-
-### FILE: k8s\config\development\ingress.yaml
-```
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: meeting-app-ingress
-  namespace: meeting-app
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
-    nginx.ingress.kubernetes.io/use-regex: "true"
-    nginx.ingress.kubernetes.io/enable-cors: "true"
-    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS"
-    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      more_set_headers "Access-Control-Allow-Origin: $http_origin";
-spec:
-  rules:
-  - host: meeting-app.local
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: meeting-frontend-internal
-            port:
-              number: 3000
-  - host: api.meeting-app.local
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: meeting-backend-internal
-            port:
-              number: 5000
-  - host: ws.meeting-app.local
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: meeting-backend-internal
-            port:
-              number: 3001 
-```
-
-
-### FILE: k8s\config\development\network-policies.yaml
-```
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: frontend-policy
-  namespace: meeting-app
-spec:
-  podSelector:
-    matchLabels:
-      app: meeting-frontend
-  ingress:
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: ingress-nginx
-    ports:
-    - protocol: TCP
-      port: 3000
-  egress:
-  - to:
-    - podSelector:
-        matchLabels:
-          app: meeting-backend
-    ports:
-    - protocol: TCP
-      port: 5000
-    - protocol: TCP
-      port: 3001
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: backend-policy
-  namespace: meeting-app
-spec:
-  podSelector:
-    matchLabels:
-      app: meeting-backend
-  ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          app: meeting-frontend
-    ports:
-    - protocol: TCP
-      port: 5000
-    - protocol: TCP
-      port: 3001
-  egress:
-  - to:
-    - podSelector:
-        matchLabels:
-          app: postgres-db
-    ports:
-    - protocol: TCP
-      port: 5432
-  - to:
-    - podSelector:
-        matchLabels:
-          app: redis-cache
-    ports:
-    - protocol: TCP
-      port: 6379
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: database-policy
-  namespace: meeting-app
-spec:
-  podSelector:
-    matchLabels:
-      app: postgres-db
-  ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          app: meeting-backend
-    ports:
-    - protocol: TCP
-      port: 5432
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: cache-policy
-  namespace: meeting-app
-spec:
-  podSelector:
-    matchLabels:
-      app: redis-cache
-  ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          app: meeting-backend
-    ports:
-    - protocol: TCP
-      port: 6379 
-```
-
-
-### FILE: k8s\config\development\postgres.yaml
-```
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: postgres-db
-  namespace: meeting-app
-  labels:
-    app: postgres-db
-    component: database
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: postgres-db
-  template:
-    metadata:
-      labels:
-        app: postgres-db
-    spec:
-      containers:
-      - name: postgres-server
-        image: postgres:15-alpine
-        ports:
-        - containerPort: 5432
-          name: pg-port
-        env:
-        - name: POSTGRES_DB
-          valueFrom:
-            configMapKeyRef:
-              name: meeting-app-config
-              key: POSTGRES_DB
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: meeting-app-secrets
-              key: POSTGRES_USER
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: meeting-app-secrets
-              key: POSTGRES_PASSWORD
-        resources:
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-        readinessProbe:
-          exec:
-            command: ["pg_isready", "-U", "$(POSTGRES_USER)"]
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        livenessProbe:
-          exec:
-            command: ["pg_isready", "-U", "$(POSTGRES_USER)"]
-          initialDelaySeconds: 15
-          periodSeconds: 20
-        volumeMounts:
-        - name: postgres-data
-          mountPath: /var/lib/postgresql/data
-          subPath: postgres
-      volumes:
-      - name: postgres-data
-        emptyDir: {}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: postgres-db
-  namespace: meeting-app
-  labels:
-    app: postgres-db
-    type: internal
-spec:
-  selector:
-    app: postgres-db
-  ports:
-  - name: pg-port
-    port: 5432
-    targetPort: pg-port 
-```
-
-
-### FILE: k8s\config\development\redis.yaml
-```
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: redis-cache
-  namespace: meeting-app
-  labels:
-    app: redis-cache
-    component: cache
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: redis-cache
-  template:
-    metadata:
-      labels:
-        app: redis-cache
-    spec:
-      containers:
-      - name: redis-server
-        image: redis:7-alpine
-        args: ["--requirepass", "$(REDIS_PASSWORD)"]
-        ports:
-        - containerPort: 6379
-          name: redis-port
-        env:
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: meeting-app-secrets
-              key: REDIS_PASSWORD
-        resources:
-          limits:
-            memory: "128Mi"
-            cpu: "100m"
-          requests:
-            memory: "64Mi"
-            cpu: "50m"
-        livenessProbe:
-          tcpSocket:
-            port: redis-port
-          initialDelaySeconds: 15
-          periodSeconds: 20
-        readinessProbe:
-          tcpSocket:
-            port: redis-port
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        volumeMounts:
-        - name: redis-data
-          mountPath: /data
-      volumes:
-      - name: redis-data
-        emptyDir: {}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: redis-cache
-  namespace: meeting-app
-  labels:
-    app: redis-cache
-    type: internal
-spec:
-  selector:
-    app: redis-cache
-  ports:
-  - name: redis-port
-    port: 6379
-    targetPort: redis-port 
-```
-
-
-### FILE: k8s\config\development\secrets.yaml
-```
-apiVersion: v1
-kind: Secret
-metadata:
-  name: meeting-app-secrets
-  namespace: meeting-app
-type: Opaque
-stringData:
-  POSTGRES_USER: dev_user
-  POSTGRES_PASSWORD: dev-password-123
-  JWT_SECRET_KEY: dev-jwt-secret-123
-  REDIS_PASSWORD: dev-redis-123
-  GRAFANA_ADMIN_PASSWORD: dev-grafana-123 
-```
-
-
-### FILE: k8s\config\development\volumes.yaml
-```
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: meeting-app-data
-  namespace: meeting-app
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
-  storageClassName: local-path
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: meeting-app-logs
-  namespace: meeting-app
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 2Gi
-  storageClassName: local-path 
-```
-
-
-### FILE: k8s\logging\elasticsearch-deployment.yaml
-```
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: elasticsearch
-  labels:
-    app: elasticsearch
-spec:
-  serviceName: elasticsearch
-  replicas: 1
-  selector:
-    matchLabels:
-      app: elasticsearch
-  template:
-    metadata:
-      labels:
-        app: elasticsearch
-    spec:
-      containers:
-      - name: elasticsearch
-        image: docker.elastic.co/elasticsearch/elasticsearch:7.17.0
-        ports:
-        - containerPort: 9200
-          name: http
-        - containerPort: 9300
-          name: transport
-        env:
-        - name: discovery.type
-          value: single-node
-        - name: ES_JAVA_OPTS
-          value: "-Xms512m -Xmx512m"
-        resources:
-          limits:
-            cpu: "1000m"
-            memory: "2Gi"
-          requests:
-            cpu: "500m"
-            memory: "1Gi"
-        volumeMounts:
-        - name: elasticsearch-data
-          mountPath: /usr/share/elasticsearch/data
-        readinessProbe:
-          httpGet:
-            path: /_cluster/health
-            port: 9200
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        livenessProbe:
-          httpGet:
-            path: /_cluster/health
-            port: 9200
-          initialDelaySeconds: 60
-          periodSeconds: 20
-  volumeClaimTemplates:
-  - metadata:
-      name: elasticsearch-data
-    spec:
-      accessModes: ["ReadWriteOnce"]
-      resources:
-        requests:
-          storage: 10Gi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: elasticsearch
-spec:
-  type: ClusterIP
-  ports:
-  - port: 9200
-    targetPort: 9200
-    protocol: TCP
-    name: http
-  - port: 9300
-    targetPort: 9300
-    protocol: TCP
-    name: transport
-  selector:
-    app: elasticsearch 
-```
-
-
-### FILE: k8s\logging\filebeat-daemonset.yaml
-```
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: filebeat-config
-data:
-  filebeat.yml: |
-    filebeat.inputs:
-    - type: container
-      paths:
-        - /var/log/containers/*.log
-      processors:
-        - add_kubernetes_metadata:
-            host: ${NODE_NAME}
-            matchers:
-            - logs_path:
-                logs_path: "/var/log/containers/"
-
-    output.logstash:
-      hosts: ["logstash:5044"]
-
-    logging.level: info
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: filebeat
-  labels:
-    app: filebeat
-spec:
-  selector:
-    matchLabels:
-      app: filebeat
-  template:
-    metadata:
-      labels:
-        app: filebeat
-    spec:
-      serviceAccountName: filebeat
-      terminationGracePeriodSeconds: 30
-      hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
-      containers:
-      - name: filebeat
-        image: docker.elastic.co/beats/filebeat:7.17.0
-        args: [
-          "-c", "/etc/filebeat.yml",
-          "-e",
-        ]
-        env:
-        - name: NODE_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
-        securityContext:
-          runAsUser: 0
-        resources:
-          limits:
-            memory: 200Mi
-            cpu: 500m
-          requests:
-            memory: 100Mi
-            cpu: 100m
-        volumeMounts:
-        - name: config
-          mountPath: /etc/filebeat.yml
-          readOnly: true
-          subPath: filebeat.yml
-        - name: data
-          mountPath: /usr/share/filebeat/data
-        - name: varlibdockercontainers
-          mountPath: /var/lib/docker/containers
-          readOnly: true
-        - name: varlog
-          mountPath: /var/log
-          readOnly: true
-      volumes:
-      - name: config
-        configMap:
-          name: filebeat-config
-      - name: varlibdockercontainers
-        hostPath:
-          path: /var/lib/docker/containers
-      - name: varlog
-        hostPath:
-          path: /var/log
-      - name: data
-        hostPath:
-          path: /var/lib/filebeat-data
-          type: DirectoryOrCreate
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: filebeat
-subjects:
-- kind: ServiceAccount
-  name: filebeat
-  namespace: default
-roleRef:
-  kind: ClusterRole
-  name: filebeat
-  apiGroup: rbac.authorization.k8s.io
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: filebeat
-  labels:
-    app: filebeat
-rules:
-- apiGroups: [""]
-  resources:
-  - namespaces
-  - pods
-  verbs:
-  - get
-  - watch
-  - list
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: filebeat
-  labels:
-    app: filebeat 
-```
-
-
-### FILE: k8s\logging\logstash-deployment.yaml
-```
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: logstash-config
-data:
-  logstash.yml: |
-    http.host: "0.0.0.0"
-    xpack.monitoring.enabled: false
-
-  logstash.conf: |
-    input {
-      beats {
-        port => 5044
-      }
+// Allow overriding config from server-provided environment variables if available
+if (typeof window !== 'undefined') {
+  // Only runs in browser
+  try {
+    // Check if window.__NEXT_DATA__.props.pageProps.runtimeConfig exists
+    const serverRuntimeConfig = (window as any).__NEXT_DATA__?.props?.pageProps?.runtimeConfig;
+    if (serverRuntimeConfig) {
+      Object.assign(runtimeConfig, serverRuntimeConfig);
     }
-
-    filter {
-      if [kubernetes] {
-        mutate {
-          add_field => {
-            "app" => "%{[kubernetes][labels][app]}"
-            "namespace" => "%{[kubernetes][namespace]}"
-            "pod" => "%{[kubernetes][pod][name]}"
-          }
-        }
-      }
-    }
-
-    output {
-      elasticsearch {
-        hosts => ["elasticsearch:9200"]
-        index => "logstash-%{+YYYY.MM.dd}"
-      }
-    }
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: logstash
-  labels:
-    app: logstash
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: logstash
-  template:
-    metadata:
-      labels:
-        app: logstash
-    spec:
-      containers:
-      - name: logstash
-        image: docker.elastic.co/logstash/logstash:7.17.0
-        ports:
-        - containerPort: 5044
-          name: beats
-        env:
-        - name: LS_JAVA_OPTS
-          value: "-Xms256m -Xmx256m"
-        resources:
-          limits:
-            cpu: "1000m"
-            memory: "1Gi"
-          requests:
-            cpu: "500m"
-            memory: "512Mi"
-        volumeMounts:
-        - name: config
-          mountPath: /usr/share/logstash/config
-        - name: pipeline
-          mountPath: /usr/share/logstash/pipeline
-        readinessProbe:
-          httpGet:
-            path: /
-            port: 9600
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        livenessProbe:
-          httpGet:
-            path: /
-            port: 9600
-          initialDelaySeconds: 60
-          periodSeconds: 20
-      volumes:
-      - name: config
-        configMap:
-          name: logstash-config
-          items:
-          - key: logstash.yml
-            path: logstash.yml
-      - name: pipeline
-        configMap:
-          name: logstash-config
-          items:
-          - key: logstash.conf
-            path: logstash.conf
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: logstash
-spec:
-  type: ClusterIP
-  ports:
-  - port: 5044
-    targetPort: 5044
-    protocol: TCP
-    name: beats
-  selector:
-    app: logstash 
-```
-
-
-### FILE: k8s\monitoring\grafana-deployment.yaml
-```
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: grafana
-  labels:
-    app: grafana
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: grafana
-  template:
-    metadata:
-      labels:
-        app: grafana
-    spec:
-      containers:
-      - name: grafana
-        image: grafana/grafana:9.3.0
-        ports:
-        - containerPort: 3000
-        env:
-        - name: GF_SECURITY_ADMIN_USER
-          valueFrom:
-            secretKeyRef:
-              name: grafana-credentials
-              key: admin-user
-        - name: GF_SECURITY_ADMIN_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: grafana-credentials
-              key: admin-password
-        resources:
-          limits:
-            cpu: "500m"
-            memory: "512Mi"
-          requests:
-            cpu: "200m"
-            memory: "256Mi"
-        volumeMounts:
-        - name: grafana-storage
-          mountPath: /var/lib/grafana
-        readinessProbe:
-          httpGet:
-            path: /api/health
-            port: 3000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        livenessProbe:
-          httpGet:
-            path: /api/health
-            port: 3000
-          initialDelaySeconds: 60
-          periodSeconds: 30
-      volumes:
-      - name: grafana-storage
-        emptyDir: {}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: grafana
-spec:
-  type: ClusterIP
-  ports:
-  - port: 3000
-    targetPort: 3000
-    protocol: TCP
-  selector:
-    app: grafana
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: grafana-credentials
-type: Opaque
-data:
-  admin-user: YWRtaW4=  # admin
-  admin-password: YWRtaW4xMjM=  # admin123 
-```
-
-
-### FILE: k8s\monitoring\prometheus-config.yaml
-```
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: prometheus-config
-data:
-  prometheus.yml: |
-    global:
-      scrape_interval: 15s
-      evaluation_interval: 15s
-
-    scrape_configs:
-      - job_name: 'kubernetes-apiservers'
-        kubernetes_sd_configs:
-        - role: endpoints
-        scheme: https
-        tls_config:
-          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-        relabel_configs:
-        - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
-          action: keep
-          regex: default;kubernetes;https
-
-      - job_name: 'kubernetes-nodes'
-        scheme: https
-        tls_config:
-          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-        kubernetes_sd_configs:
-        - role: node
-        relabel_configs:
-        - action: labelmap
-          regex: __meta_kubernetes_node_label_(.+)
-
-      - job_name: 'kubernetes-pods'
-        kubernetes_sd_configs:
-        - role: pod
-        relabel_configs:
-        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-          action: keep
-          regex: true
-        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
-          action: replace
-          target_label: __metrics_path__
-          regex: (.+)
-        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
-          action: replace
-          regex: ([^:]+)(?::\d+)?;(\d+)
-          replacement: $1:$2
-          target_label: __address__
-        - action: labelmap
-          regex: __meta_kubernetes_pod_label_(.+)
-        - source_labels: [__meta_kubernetes_namespace]
-          action: replace
-          target_label: kubernetes_namespace
-        - source_labels: [__meta_kubernetes_pod_name]
-          action: replace
-          target_label: kubernetes_pod_name
-
-      - job_name: 'meeting-app-backend'
-        static_configs:
-        - targets: ['meeting-app:5000']
-
-      - job_name: 'meeting-app-websocket'
-        static_configs:
-        - targets: ['meeting-app:3001']
-
-      - job_name: 'meeting-app-frontend'
-        static_configs:
-        - targets: ['meeting-app-frontend:3000'] 
-```
-
-
-### FILE: k8s\monitoring\prometheus-deployment.yaml
-```
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: prometheus
-  labels:
-    app: prometheus
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: prometheus
-  template:
-    metadata:
-      labels:
-        app: prometheus
-    spec:
-      serviceAccountName: prometheus
-      containers:
-      - name: prometheus
-        image: prom/prometheus:v2.40.0
-        args:
-        - "--config.file=/etc/prometheus/prometheus.yml"
-        - "--storage.tsdb.path=/prometheus"
-        - "--web.console.libraries=/usr/share/prometheus/console_libraries"
-        - "--web.console.templates=/usr/share/prometheus/consoles"
-        ports:
-        - containerPort: 9090
-        volumeMounts:
-        - name: prometheus-config
-          mountPath: /etc/prometheus
-        - name: prometheus-storage
-          mountPath: /prometheus
-        resources:
-          limits:
-            cpu: "1000m"
-            memory: "1Gi"
-          requests:
-            cpu: "500m"
-            memory: "512Mi"
-      volumes:
-      - name: prometheus-config
-        configMap:
-          name: prometheus-config
-      - name: prometheus-storage
-        emptyDir: {}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: prometheus
-spec:
-  type: ClusterIP
-  ports:
-  - port: 9090
-    targetPort: 9090
-    protocol: TCP
-  selector:
-    app: prometheus
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: prometheus
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: prometheus
-rules:
-- apiGroups: [""]
-  resources:
-  - nodes
-  - nodes/proxy
-  - services
-  - endpoints
-  - pods
-  verbs: ["get", "list", "watch"]
-- apiGroups:
-  - extensions
-  resources:
-  - ingresses
-  verbs: ["get", "list", "watch"]
-- nonResourceURLs: ["/metrics"]
-  verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: prometheus
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: prometheus
-subjects:
-- kind: ServiceAccount
-  name: prometheus
-  namespace: default 
-```
-
-
-### FILE: k8s\network-policies\flask-backend-policy.yaml
-```
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: flask-backend-network-policy
-spec:
-  podSelector:
-    matchLabels:
-      app: meeting-app
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          app: meeting-app-frontend
-    ports:
-    - protocol: TCP
-      port: 5000
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: ingress-nginx
-    ports:
-    - protocol: TCP
-      port: 5000
-  egress:
-  - to:
-    - podSelector:
-        matchLabels:
-          app: postgres
-    ports:
-    - protocol: TCP
-      port: 5432
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: kube-system
-      podSelector:
-        matchLabels:
-          k8s-app: kube-dns
-    ports:
-    - protocol: UDP
-      port: 53
-    - protocol: TCP
-      port: 53 
-```
-
-
-### FILE: k8s\network-policies\frontend-policy.yaml
-```
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: frontend-network-policy
-spec:
-  podSelector:
-    matchLabels:
-      app: meeting-app-frontend
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: ingress-nginx
-    ports:
-    - protocol: TCP
-      port: 3000
-  egress:
-  - to:
-    - podSelector:
-        matchLabels:
-          app: meeting-app
-    ports:
-    - protocol: TCP
-      port: 5000
-    - protocol: TCP
-      port: 3001 
-```
-
-
-### FILE: k8s\network-policies\logging-policy.yaml
-```
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: elasticsearch-policy
-spec:
-  podSelector:
-    matchLabels:
-      app: elasticsearch
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          app: logstash
-    - podSelector:
-        matchLabels:
-          app: kibana
-    ports:
-    - protocol: TCP
-      port: 9200
-  egress:
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: kube-system
-    ports:
-    - protocol: UDP
-      port: 53
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: logstash-policy
-spec:
-  podSelector:
-    matchLabels:
-      app: logstash
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          app: filebeat
-    ports:
-    - protocol: TCP
-      port: 5044
-  egress:
-  - to:
-    - podSelector:
-        matchLabels:
-          app: elasticsearch
-    ports:
-    - protocol: TCP
-      port: 9200
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: kube-system
-    ports:
-    - protocol: UDP
-      port: 53
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: kibana-policy
-spec:
-  podSelector:
-    matchLabels:
-      app: kibana
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: ingress-nginx
-    ports:
-    - protocol: TCP
-      port: 5601
-  egress:
-  - to:
-    - podSelector:
-        matchLabels:
-          app: elasticsearch
-    ports:
-    - protocol: TCP
-      port: 9200
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: kube-system
-    ports:
-    - protocol: UDP
-      port: 53
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: filebeat-policy
-spec:
-  podSelector:
-    matchLabels:
-      app: filebeat
-  policyTypes:
-  - Egress
-  egress:
-  - to:
-    - podSelector:
-        matchLabels:
-          app: logstash
-    ports:
-    - protocol: TCP
-      port: 5044
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: kube-system
-    ports:
-    - protocol: UDP
-      port: 53 
-```
-
-
-### FILE: k8s\network-policies\monitoring-policy.yaml
-```
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: monitoring-network-policy
-spec:
-  podSelector:
-    matchLabels:
-      app: prometheus
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          app: grafana
-    ports:
-    - protocol: TCP
-      port: 9090
-  egress:
-  - to:
-    - podSelector:
-        matchLabels:
-          app: meeting-app
-    ports:
-    - protocol: TCP
-      port: 5000
-    - protocol: TCP
-      port: 3001
-  - to:
-    - podSelector:
-        matchLabels:
-          app: meeting-app-frontend
-    ports:
-    - protocol: TCP
-      port: 3000
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: grafana-network-policy
-spec:
-  podSelector:
-    matchLabels:
-      app: grafana
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: ingress-nginx
-    ports:
-    - protocol: TCP
-      port: 3000
-  egress:
-  - to:
-    - podSelector:
-        matchLabels:
-          app: prometheus
-    ports:
-    - protocol: TCP
-      port: 9090 
-```
-
-
-### FILE: k8s\network-policies\node-backend-policy.yaml
-```
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: node-backend-network-policy
-spec:
-  podSelector:
-    matchLabels:
-      app: meeting-app
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          app: meeting-app-frontend
-    ports:
-    - protocol: TCP
-      port: 3001
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: ingress-nginx
-    ports:
-    - protocol: TCP
-      port: 3001
-  egress:
-  - to:
-    - podSelector:
-        matchLabels:
-          app: postgres
-    ports:
-    - protocol: TCP
-      port: 5432
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: kube-system
-      podSelector:
-        matchLabels:
-          k8s-app: kube-dns
-    ports:
-    - protocol: UDP
-      port: 53
-    - protocol: TCP
-      port: 53 
-```
-
-
-### FILE: k8s\network-policies\postgres-policy.yaml
-```
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: postgres-network-policy
-spec:
-  podSelector:
-    matchLabels:
-      app: postgres
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          app: meeting-app
-    ports:
-    - protocol: TCP
-      port: 5432
-  egress:
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: kube-system
-      podSelector:
-        matchLabels:
-          k8s-app: kube-dns
-    ports:
-    - protocol: UDP
-      port: 53
-    - protocol: TCP
-      port: 53 
-```
-
-
-### FILE: k8s\network-policies\redis-policy.yaml
-```
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: redis-network-policy
-spec:
-  podSelector:
-    matchLabels:
-      app: redis
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          app: meeting-app
-    ports:
-    - protocol: TCP
-      port: 6379
-  egress:
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: kube-system
-      podSelector:
-        matchLabels:
-          k8s-app: kube-dns
-    ports:
-    - protocol: UDP
-      port: 53
-    - protocol: TCP
-      port: 53 
-```
-
-
-### FILE: k8s\scripts\backup-restore.sh
-```
-#!/bin/bash
-
-# Function to display usage
-usage() {
-    echo "Usage: $0 [backup|restore] [options]"
-    echo
-    echo "Commands:"
-    echo "  backup   Create a backup of the PostgreSQL database"
-    echo "  restore  Restore a backup to the PostgreSQL database"
-    echo
-    echo "Options:"
-    echo "  -f, --file      Backup file name (default: backup-YYYY-MM-DD.sql)"
-    echo "  -n, --namespace Namespace (default: app)"
-    echo "  -d, --database  Database name (required)"
-    echo
-    echo "Examples:"
-    echo "  $0 backup -d myapp -f custom-backup.sql"
-    echo "  $0 restore -d myapp -f backup-2023-12-25.sql"
-    exit 1
+  } catch (e) {
+    console.warn('Failed to load server runtime config:', e);
+  }
 }
 
-# Function to get pod name
-get_pod_name() {
-    local namespace=${1:-app}
-    kubectl get pods -n $namespace -l app=postgres -o jsonpath="{.items[0].metadata.name}"
-}
-
-# Function to create backup
-create_backup() {
-    local database=$1
-    local backup_file=$2
-    local namespace=${3:-app}
-    
-    local pod=$(get_pod_name $namespace)
-    if [ -z "$pod" ]; then
-        echo "Error: PostgreSQL pod not found in namespace $namespace"
-        exit 1
-    fi
-    
-    echo "Creating backup of database $database to file $backup_file"
-    
-    # Create backup directory if it doesn't exist
-    mkdir -p backups
-    
-    # Get database credentials from secret
-    local db_user=$(kubectl get secret postgres-secret -n $namespace -o jsonpath="{.data.POSTGRES_USER}" | base64 --decode)
-    local db_password=$(kubectl get secret postgres-secret -n $namespace -o jsonpath="{.data.POSTGRES_PASSWORD}" | base64 --decode)
-    
-    # Create backup
-    kubectl exec -n $namespace $pod -- \
-        pg_dump -U $db_user -d $database \
-        | gzip > "backups/$backup_file.gz"
-    
-    if [ $? -eq 0 ]; then
-        echo "Backup completed successfully"
-        echo "Backup file: backups/$backup_file.gz"
-    else
-        echo "Error: Backup failed"
-        exit 1
-    fi
-}
-
-# Function to restore backup
-restore_backup() {
-    local database=$1
-    local backup_file=$2
-    local namespace=${3:-app}
-    
-    local pod=$(get_pod_name $namespace)
-    if [ -z "$pod" ]; then
-        echo "Error: PostgreSQL pod not found in namespace $namespace"
-        exit 1
-    fi
-    
-    if [ ! -f "backups/$backup_file.gz" ]; then
-        echo "Error: Backup file backups/$backup_file.gz not found"
-        exit 1
-    fi
-    
-    echo "Restoring database $database from file $backup_file"
-    
-    # Get database credentials from secret
-    local db_user=$(kubectl get secret postgres-secret -n $namespace -o jsonpath="{.data.POSTGRES_USER}" | base64 --decode)
-    local db_password=$(kubectl get secret postgres-secret -n $namespace -o jsonpath="{.data.POSTGRES_PASSWORD}" | base64 --decode)
-    
-    # Drop existing connections
-    kubectl exec -n $namespace $pod -- \
-        psql -U $db_user -d postgres -c "
-            SELECT pg_terminate_backend(pid)
-            FROM pg_stat_activity
-            WHERE datname = '$database'
-            AND pid <> pg_backend_pid();"
-    
-    # Drop and recreate database
-    kubectl exec -n $namespace $pod -- \
-        psql -U $db_user -d postgres -c "DROP DATABASE IF EXISTS $database;"
-    kubectl exec -n $namespace $pod -- \
-        psql -U $db_user -d postgres -c "CREATE DATABASE $database;"
-    
-    # Restore backup
-    gunzip < "backups/$backup_file.gz" | \
-        kubectl exec -i -n $namespace $pod -- \
-        psql -U $db_user -d $database
-    
-    if [ $? -eq 0 ]; then
-        echo "Restore completed successfully"
-    else
-        echo "Error: Restore failed"
-        exit 1
-    fi
-}
-
-# Parse command line arguments
-if [ $# -lt 1 ]; then
-    usage
-fi
-
-command=$1
-shift
-
-namespace="app"
-database=""
-backup_file="backup-$(date +%Y-%m-%d).sql"
-
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -n|--namespace)
-            namespace="$2"
-            shift 2
-            ;;
-        -d|--database)
-            database="$2"
-            shift 2
-            ;;
-        -f|--file)
-            backup_file="$2"
-            shift 2
-            ;;
-        *)
-            echo "Unknown option: $1"
-            usage
-            ;;
-    esac
-done
-
-if [ -z "$database" ]; then
-    echo "Error: Database name is required"
-    usage
-fi
-
-case $command in
-    backup)
-        create_backup $database $backup_file $namespace
-        ;;
-    restore)
-        read -p "Warning: This will overwrite the existing database. Continue? (y/n) " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            restore_backup $database $backup_file $namespace
-        else
-            echo "Operation cancelled"
-            exit 1
-        fi
-        ;;
-    *)
-        echo "Unknown command: $command"
-        usage
-        ;;
-esac 
-```
-
-
-### FILE: k8s\scripts\cleanup.sh
-```
-#!/bin/bash
-
-# Function to confirm deletion
-confirm_deletion() {
-    read -p "Are you sure you want to delete all resources? This action cannot be undone. (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Operation cancelled."
-        exit 1
-    fi
-}
-
-# Function to delete resources with a namespace
-delete_namespace_resources() {
-    local namespace=$1
-    echo "Deleting resources in namespace: $namespace"
-    
-    # Delete deployments
-    kubectl delete deployments --all -n $namespace
-    
-    # Delete services
-    kubectl delete services --all -n $namespace
-    
-    # Delete pods
-    kubectl delete pods --all -n $namespace
-    
-    # Delete configmaps
-    kubectl delete configmaps --all -n $namespace
-    
-    # Delete secrets
-    kubectl delete secrets --all -n $namespace
-    
-    # Delete HPA
-    kubectl delete hpa --all -n $namespace
-    
-    # Delete PVCs
-    kubectl delete pvc --all -n $namespace
-    
-    # Delete the namespace itself
-    kubectl delete namespace $namespace
-}
-
-# Main cleanup process
-echo "Starting cleanup process..."
-confirm_deletion
-
-# Delete Ingress resources
-echo "Deleting Ingress resources..."
-kubectl delete -f ../ingress.yaml
-
-# Delete Network Policies
-echo "Deleting Network Policies..."
-kubectl delete -f ../network-policies/frontend-policy.yaml
-kubectl delete -f ../network-policies/flask-backend-policy.yaml
-kubectl delete -f ../network-policies/node-backend-policy.yaml
-kubectl delete -f ../network-policies/postgres-policy.yaml
-kubectl delete -f ../network-policies/monitoring-policy.yaml
-kubectl delete -f ../network-policies/logging-policy.yaml
-
-# Delete resources in each namespace
-delete_namespace_resources "app"
-delete_namespace_resources "monitoring"
-delete_namespace_resources "logging"
-
-# Delete PVs (cluster-wide resource)
-echo "Deleting Persistent Volumes..."
-kubectl delete pv --all
-
-# Delete cluster roles and bindings
-echo "Deleting cluster roles and bindings..."
-kubectl delete clusterrole filebeat
-kubectl delete clusterrolebinding filebeat
-
-# Delete any remaining resources
-echo "Deleting any remaining resources..."
-kubectl delete all --all -A
-
-echo "Cleanup complete!"
-echo "Note: Some resources may take a few minutes to be fully deleted."
-echo "You can check the status with: kubectl get all -A" 
-```
-
-
-### FILE: k8s\scripts\deploy-all.sh
-```
-#!/bin/bash
-
-# Function to check if a resource exists
-check_resource() {
-    local resource_type=$1
-    local resource_name=$2
-    kubectl get $resource_type $resource_name &> /dev/null
-}
-
-# Function to wait for a deployment to be ready
-wait_for_deployment() {
-    local deployment_name=$1
-    echo "Waiting for deployment $deployment_name to be ready..."
-    kubectl wait --for=condition=available --timeout=300s deployment/$deployment_name
-}
-
-# Create namespaces if they don't exist
-if ! check_resource namespace app; then
-    echo "Creating app namespace..."
-    kubectl create namespace app
-fi
-
-if ! check_resource namespace monitoring; then
-    echo "Creating monitoring namespace..."
-    kubectl create namespace monitoring
-fi
-
-if ! check_resource namespace logging; then
-    echo "Creating logging namespace..."
-    kubectl create namespace logging
-fi
-
-# Apply Secrets
-echo "Applying Secrets..."
-kubectl apply -f ../secrets.yaml
-
-# Apply Network Policies
-echo "Applying Network Policies..."
-kubectl apply -f ../network-policies/frontend-policy.yaml
-kubectl apply -f ../network-policies/flask-backend-policy.yaml
-kubectl apply -f ../network-policies/node-backend-policy.yaml
-kubectl apply -f ../network-policies/postgres-policy.yaml
-kubectl apply -f ../network-policies/monitoring-policy.yaml
-kubectl apply -f ../network-policies/logging-policy.yaml
-
-# Deploy PostgreSQL
-echo "Deploying PostgreSQL..."
-kubectl apply -f ../postgres-deployment.yaml
-echo "Waiting for PostgreSQL to be ready..."
-kubectl wait --for=condition=ready pod -l app=postgres --timeout=300s
-
-# Deploy Flask Backend
-echo "Deploying Flask Backend..."
-kubectl apply -f ../flask-backend-deployment.yaml
-wait_for_deployment flask-backend
-
-# Deploy Node.js Backend
-echo "Deploying Node.js Backend..."
-kubectl apply -f ../node-backend-deployment.yaml
-wait_for_deployment node-backend
-
-# Deploy Frontend
-echo "Deploying Frontend..."
-kubectl apply -f ../frontend-deployment.yaml
-wait_for_deployment frontend
-
-# Deploy Monitoring Stack
-echo "Deploying Monitoring Stack..."
-./deploy-monitoring.sh
-
-# Deploy Logging Stack
-echo "Deploying Logging Stack..."
-./deploy-logging.sh
-
-# Apply Ingress
-echo "Applying Ingress..."
-kubectl apply -f ../ingress.yaml
-
-# Apply HPA
-echo "Applying Horizontal Pod Autoscaling..."
-kubectl apply -f ../hpa.yaml
-
-# Wait for all pods to be ready
-echo "Waiting for all pods to be ready..."
-kubectl wait --for=condition=ready pod -l app=frontend --timeout=300s
-kubectl wait --for=condition=ready pod -l app=flask-backend --timeout=300s
-kubectl wait --for=condition=ready pod -l app=node-backend --timeout=300s
-kubectl wait --for=condition=ready pod -l app=postgres --timeout=300s
-
-echo "Application stack deployment complete!"
-echo "The application will be available at: http://localhost"
-echo "Grafana will be available at: http://localhost:3000"
-echo "Kibana will be available at: http://localhost:5601"
-
-echo "To view the status of your pods:"
-echo "kubectl get pods -A"
-
-echo "To view the status of your services:"
-echo "kubectl get svc -A"
-
-echo "To view the status of your deployments:"
-echo "kubectl get deployments -A"
-
-echo "To view the logs of a specific pod:"
-echo "kubectl logs <pod-name>"
-
-echo "To port-forward services locally:"
-echo "kubectl port-forward svc/frontend 3000:3000"
-echo "kubectl port-forward svc/grafana 3000:3000"
-echo "kubectl port-forward svc/kibana 5601:5601" 
-```
-
-
-### FILE: k8s\scripts\deploy-logging.sh
-```
-#!/bin/bash
-
-# Function to check if a resource exists
-check_resource() {
-    local resource_type=$1
-    local resource_name=$2
-    kubectl get $resource_type $resource_name &> /dev/null
-}
-
-# Function to wait for a deployment to be ready
-wait_for_deployment() {
-    local deployment_name=$1
-    echo "Waiting for deployment $deployment_name to be ready..."
-    kubectl wait --for=condition=available --timeout=300s deployment/$deployment_name
-}
-
-# Create namespace if it doesn't exist
-if ! check_resource namespace logging; then
-    echo "Creating logging namespace..."
-    kubectl create namespace logging
-fi
-
-# Apply ConfigMaps
-echo "Applying ConfigMaps..."
-kubectl apply -f ../logging/elasticsearch-deployment.yaml
-kubectl apply -f ../logging/logstash-deployment.yaml
-kubectl apply -f ../logging/filebeat-daemonset.yaml
-
-# Apply Network Policies
-echo "Applying Network Policies..."
-kubectl apply -f ../network-policies/logging-policy.yaml
-
-# Deploy Elasticsearch
-echo "Deploying Elasticsearch..."
-kubectl apply -f ../logging/elasticsearch-deployment.yaml
-wait_for_deployment elasticsearch
-
-# Deploy Logstash
-echo "Deploying Logstash..."
-kubectl apply -f ../logging/logstash-deployment.yaml
-wait_for_deployment logstash
-
-# Deploy Kibana
-echo "Deploying Kibana..."
-kubectl apply -f ../logging/kibana-deployment.yaml
-wait_for_deployment kibana
-
-# Deploy Filebeat
-echo "Deploying Filebeat..."
-kubectl apply -f ../logging/filebeat-daemonset.yaml
-
-# Wait for all pods to be ready
-echo "Waiting for all pods to be ready..."
-kubectl wait --for=condition=ready pod -l app=elasticsearch --timeout=300s
-kubectl wait --for=condition=ready pod -l app=logstash --timeout=300s
-kubectl wait --for=condition=ready pod -l app=kibana --timeout=300s
-kubectl wait --for=condition=ready pod -l app=filebeat --timeout=300s
-
-echo "Logging stack deployment complete!"
-echo "Kibana will be available at: http://localhost:5601"
-echo "To port-forward Kibana: kubectl port-forward svc/kibana 5601:5601" 
-```
-
-
-### FILE: k8s\scripts\deploy-monitoring.sh
-```
-#!/bin/bash
-
-# Function to check if a resource exists
-check_resource() {
-    local resource_type=$1
-    local resource_name=$2
-    kubectl get $resource_type $resource_name &> /dev/null
-}
-
-# Function to wait for a deployment to be ready
-wait_for_deployment() {
-    local deployment_name=$1
-    echo "Waiting for deployment $deployment_name to be ready..."
-    kubectl wait --for=condition=available --timeout=300s deployment/$deployment_name
-}
-
-# Create namespace if it doesn't exist
-if ! check_resource namespace monitoring; then
-    echo "Creating monitoring namespace..."
-    kubectl create namespace monitoring
-fi
-
-# Apply ConfigMaps
-echo "Applying ConfigMaps..."
-kubectl apply -f ../monitoring/prometheus-config.yaml
-
-# Apply Network Policies
-echo "Applying Network Policies..."
-kubectl apply -f ../network-policies/monitoring-policy.yaml
-
-# Deploy Prometheus
-echo "Deploying Prometheus..."
-kubectl apply -f ../monitoring/prometheus-deployment.yaml
-wait_for_deployment prometheus
-
-# Deploy Grafana
-echo "Deploying Grafana..."
-kubectl apply -f ../monitoring/grafana-deployment.yaml
-wait_for_deployment grafana
-
-# Wait for all pods to be ready
-echo "Waiting for all pods to be ready..."
-kubectl wait --for=condition=ready pod -l app=prometheus --timeout=300s
-kubectl wait --for=condition=ready pod -l app=grafana --timeout=300s
-
-echo "Monitoring stack deployment complete!"
-echo "Grafana will be available at: http://localhost:3000"
-echo "Prometheus will be available at: http://localhost:9090"
-echo "To port-forward Grafana: kubectl port-forward svc/grafana 3000:3000"
-echo "To port-forward Prometheus: kubectl port-forward svc/prometheus 9090:9090"
-
-# Import default dashboards
-echo "Importing default dashboards..."
-kubectl exec -it $(kubectl get pods -l app=grafana -o jsonpath="{.items[0].metadata.name}") -- \
-  grafana-cli plugins install grafana-kubernetes-app
-
-echo "Default dashboards have been imported."
-echo "You can now log in to Grafana with the default credentials:"
-echo "Username: admin"
-echo "Password: admin"
-echo "Please change the password after your first login." 
-```
-
-
-### FILE: k8s\scripts\manage-certs.sh
-```
-#!/bin/bash
-
-# Function to display usage
-usage() {
-    echo "Usage: $0 [command] [options]"
-    echo
-    echo "Commands:"
-    echo "  generate  Generate a new SSL certificate"
-    echo "  install   Install certificates to Kubernetes"
-    echo "  renew     Renew existing certificates"
-    echo "  list      List installed certificates"
-    echo "  delete    Delete certificates"
-    echo
-    echo "Options:"
-    echo "  -n, --namespace    Namespace (default: app)"
-    echo "  -d, --domain       Domain name"
-    echo "  -e, --email        Email address for Let's Encrypt"
-    echo "  -s, --secret       Secret name for storing certificates"
-    echo "  --staging          Use Let's Encrypt staging environment"
-    echo
-    echo "Examples:"
-    echo "  $0 generate -d example.com -e admin@example.com"
-    echo "  $0 install -d example.com -s tls-secret"
-    echo "  $0 renew -s tls-secret"
-    exit 1
-}
-
-# Function to validate domain name
-validate_domain() {
-    local domain=$1
-    if [[ ! $domain =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$ ]]; then
-        echo "Error: Invalid domain name"
-        exit 1
-    fi
-}
-
-# Function to validate email
-validate_email() {
-    local email=$1
-    if [[ ! $email =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
-        echo "Error: Invalid email address"
-        exit 1
-    fi
-}
-
-# Function to generate self-signed certificate
-generate_self_signed() {
-    local domain=$1
-    local output_dir="certs/$domain"
-    
-    mkdir -p $output_dir
-    
-    # Generate private key
-    openssl genrsa -out "$output_dir/tls.key" 2048
-    
-    # Generate CSR
-    openssl req -new -key "$output_dir/tls.key" \
-        -out "$output_dir/tls.csr" \
-        -subj "/CN=$domain"
-    
-    # Generate certificate
-    openssl x509 -req -days 365 \
-        -in "$output_dir/tls.csr" \
-        -signkey "$output_dir/tls.key" \
-        -out "$output_dir/tls.crt"
-    
-    echo "Self-signed certificate generated in $output_dir"
-}
-
-# Function to generate Let's Encrypt certificate
-generate_letsencrypt() {
-    local domain=$1
-    local email=$2
-    local staging=$3
-    local output_dir="certs/$domain"
-    
-    mkdir -p $output_dir
-    
-    # Install certbot if not present
-    if ! command -v certbot &> /dev/null; then
-        echo "Installing certbot..."
-        pip install certbot
-    fi
-    
-    # Generate certificate
-    local staging_arg=""
-    if [ "$staging" = true ]; then
-        staging_arg="--staging"
-    fi
-    
-    certbot certonly \
-        --manual \
-        --preferred-challenges=dns \
-        --email $email \
-        --agree-tos \
-        --no-eff-email \
-        $staging_arg \
-        -d $domain
-    
-    # Copy certificates to output directory
-    cp /etc/letsencrypt/live/$domain/fullchain.pem "$output_dir/tls.crt"
-    cp /etc/letsencrypt/live/$domain/privkey.pem "$output_dir/tls.key"
-    
-    echo "Let's Encrypt certificate generated in $output_dir"
-}
-
-# Function to install certificates to Kubernetes
-install_certs() {
-    local domain=$1
-    local secret_name=$2
-    local namespace=${3:-app}
-    local cert_dir="certs/$domain"
-    
-    if [ ! -d "$cert_dir" ]; then
-        echo "Error: Certificate directory $cert_dir not found"
-        exit 1
-    fi
-    
-    if [ ! -f "$cert_dir/tls.crt" ] || [ ! -f "$cert_dir/tls.key" ]; then
-        echo "Error: Certificate files not found in $cert_dir"
-        exit 1
-    fi
-    
-    # Create TLS secret
-    kubectl create secret tls $secret_name \
-        --cert="$cert_dir/tls.crt" \
-        --key="$cert_dir/tls.key" \
-        -n $namespace
-    
-    if [ $? -eq 0 ]; then
-        echo "Certificates installed successfully"
-        
-        # Update ingress to use the new certificate
-        kubectl patch ingress app-ingress -n $namespace -p "{
-            \"spec\": {
-                \"tls\": [{
-                    \"hosts\": [\"$domain\"],
-                    \"secretName\": \"$secret_name\"
-                }]
-            }
-        }"
-    else
-        echo "Error: Failed to install certificates"
-        exit 1
-    fi
-}
-
-# Function to renew certificates
-renew_certs() {
-    local secret_name=$1
-    local namespace=${2:-app}
-    
-    # Get domain from secret
-    local domain=$(kubectl get secret $secret_name -n $namespace \
-        -o jsonpath='{.metadata.annotations.cert-manager\.io/common-name}')
-    
-    if [ -z "$domain" ]; then
-        echo "Error: Could not determine domain from secret"
-        exit 1
-    fi
-    
-    echo "Renewing certificate for $domain"
-    certbot renew --cert-name $domain
-    
-    if [ $? -eq 0 ]; then
-        # Update Kubernetes secret
-        kubectl create secret tls $secret_name \
-            --cert="/etc/letsencrypt/live/$domain/fullchain.pem" \
-            --key="/etc/letsencrypt/live/$domain/privkey.pem" \
-            -n $namespace \
-            --dry-run=client -o yaml | \
-        kubectl replace -f -
-        
-        echo "Certificate renewed successfully"
-    else
-        echo "Error: Failed to renew certificate"
-        exit 1
-    fi
-}
-
-# Function to list certificates
-list_certs() {
-    local namespace=${1:-app}
-    
-    echo "TLS secrets in namespace $namespace:"
-    kubectl get secrets -n $namespace \
-        -l "app.kubernetes.io/managed-by=cert-manager"
-}
-
-# Function to delete certificates
-delete_certs() {
-    local secret_name=$1
-    local namespace=${2:-app}
-    
-    if ! kubectl get secret $secret_name -n $namespace &> /dev/null; then
-        echo "Error: Secret $secret_name does not exist"
-        exit 1
-    fi
-    
-    read -p "Are you sure you want to delete certificate secret $secret_name? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        kubectl delete secret $secret_name -n $namespace
-        if [ $? -eq 0 ]; then
-            echo "Certificate secret deleted successfully"
-        else
-            echo "Error: Failed to delete certificate secret"
-            exit 1
-        fi
-    else
-        echo "Operation cancelled"
-    fi
-}
-
-# Parse command line arguments
-if [ $# -lt 1 ]; then
-    usage
-fi
-
-command=$1
-shift
-
-namespace="app"
-domain=""
-email=""
-secret_name=""
-staging=false
-
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -n|--namespace)
-            namespace="$2"
-            shift 2
-            ;;
-        -d|--domain)
-            domain="$2"
-            shift 2
-            ;;
-        -e|--email)
-            email="$2"
-            shift 2
-            ;;
-        -s|--secret)
-            secret_name="$2"
-            shift 2
-            ;;
-        --staging)
-            staging=true
-            shift
-            ;;
-        *)
-            echo "Unknown option: $1"
-            usage
-            ;;
-    esac
-done
-
-case $command in
-    generate)
-        if [ -z "$domain" ]; then
-            echo "Error: Domain is required for generate command"
-            usage
-        fi
-        
-        validate_domain $domain
-        
-        if [ -z "$email" ]; then
-            echo "Generating self-signed certificate"
-            generate_self_signed $domain
-        else
-            validate_email $email
-            echo "Generating Let's Encrypt certificate"
-            generate_letsencrypt $domain $email $staging
-        fi
-        ;;
-        
-    install)
-        if [ -z "$domain" ] || [ -z "$secret_name" ]; then
-            echo "Error: Domain and secret name are required for install command"
-            usage
-        fi
-        
-        validate_domain $domain
-        install_certs $domain $secret_name $namespace
-        ;;
-        
-    renew)
-        if [ -z "$secret_name" ]; then
-            echo "Error: Secret name is required for renew command"
-            usage
-        fi
-        
-        renew_certs $secret_name $namespace
-        ;;
-        
-    list)
-        list_certs $namespace
-        ;;
-        
-    delete)
-        if [ -z "$secret_name" ]; then
-            echo "Error: Secret name is required for delete command"
-            usage
-        fi
-        
-        delete_certs $secret_name $namespace
-        ;;
-        
-    *)
-        echo "Unknown command: $command"
-        usage
-        ;;
-esac 
-```
-
-
-### FILE: k8s\scripts\manage-secrets.sh
-```
-#!/bin/bash
-
-# Function to display usage
-usage() {
-    echo "Usage: $0 [command] [options]"
-    echo
-    echo "Commands:"
-    echo "  create    Create a new secret"
-    echo "  update    Update an existing secret"
-    echo "  delete    Delete a secret"
-    echo "  view      View secret details"
-    echo "  list      List all secrets"
-    echo "  rotate    Rotate secret values"
-    echo
-    echo "Options:"
-    echo "  -n, --namespace  Namespace (default: app)"
-    echo "  -s, --secret     Secret name"
-    echo "  -k, --key        Key name for create/update"
-    echo "  -v, --value      Value for create/update"
-    echo "  -f, --file       File containing key-value pairs"
-    echo
-    echo "Examples:"
-    echo "  $0 create -s my-secret -k api-key -v 12345"
-    echo "  $0 update -s my-secret -f secrets.env"
-    echo "  $0 view -s my-secret"
-    echo "  $0 rotate -s postgres-secret"
-    echo "  $0 rotate -s jwt-secret"
-    exit 1
-}
-
-# Function to validate input
-validate_input() {
-    local secret_name=$1
-    if [[ ! $secret_name =~ ^[a-z0-9][a-z0-9-]*[a-z0-9]$ ]]; then
-        echo "Error: Invalid secret name. Must consist of lowercase alphanumeric characters or '-'"
-        exit 1
-    fi
-}
-
-# Function to create secret
-create_secret() {
-    local secret_name=$1
-    local key=$2
-    local value=$3
-    local namespace=${4:-app}
-    
-    validate_input $secret_name
-    
-    if kubectl get secret $secret_name -n $namespace &> /dev/null; then
-        echo "Error: Secret $secret_name already exists"
-        exit 1
-    fi
-    
-    echo "Creating secret $secret_name"
-    kubectl create secret generic $secret_name \
-        --from-literal=$key=$value \
-        -n $namespace
-    
-    if [ $? -eq 0 ]; then
-        echo "Secret created successfully"
-    else
-        echo "Error: Failed to create secret"
-        exit 1
-    fi
-}
-
-# Function to update secret
-update_secret() {
-    local secret_name=$1
-    local namespace=${2:-app}
-    local file=$3
-    
-    validate_input $secret_name
-    
-    if ! kubectl get secret $secret_name -n $namespace &> /dev/null; then
-        echo "Error: Secret $secret_name does not exist"
-        exit 1
-    fi
-    
-    if [ ! -f "$file" ]; then
-        echo "Error: File $file does not exist"
-        exit 1
-    fi
-    
-    echo "Updating secret $secret_name"
-    
-    # Create a temporary file for kubectl
-    tmp_file=$(mktemp)
-    
-    # Extract current secret data
-    kubectl get secret $secret_name -n $namespace -o json > $tmp_file
-    
-    # Update with new values from file
-    while IFS='=' read -r key value || [ -n "$key" ]; do
-        # Skip empty lines and comments
-        if [ -z "$key" ] || [[ $key == \#* ]]; then
-            continue
-        fi
-        
-        # Remove any surrounding quotes from the value
-        value=$(echo $value | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
-        
-        # Base64 encode the value
-        encoded_value=$(echo -n "$value" | base64 -w 0)
-        
-        # Update the JSON with the new value
-        cat $tmp_file | jq --arg key "$key" --arg value "$encoded_value" \
-            '.data[$key] = $value' > ${tmp_file}.new
-        mv ${tmp_file}.new $tmp_file
-    done < "$file"
-    
-    # Apply the updated secret
-    kubectl apply -f $tmp_file -n $namespace
-    
-    # Clean up
-    rm $tmp_file
-    
-    if [ $? -eq 0 ]; then
-        echo "Secret updated successfully"
-    else
-        echo "Error: Failed to update secret"
-        exit 1
-    fi
-}
-
-# Function to delete secret
-delete_secret() {
-    local secret_name=$1
-    local namespace=${2:-app}
-    
-    validate_input $secret_name
-    
-    if ! kubectl get secret $secret_name -n $namespace &> /dev/null; then
-        echo "Error: Secret $secret_name does not exist"
-        exit 1
-    fi
-    
-    echo "Deleting secret $secret_name"
-    kubectl delete secret $secret_name -n $namespace
-    
-    if [ $? -eq 0 ]; then
-        echo "Secret deleted successfully"
-    else
-        echo "Error: Failed to delete secret"
-        exit 1
-    fi
-}
-
-# Function to view secret
-view_secret() {
-    local secret_name=$1
-    local namespace=${2:-app}
-    
-    validate_input $secret_name
-    
-    if ! kubectl get secret $secret_name -n $namespace &> /dev/null; then
-        echo "Error: Secret $secret_name does not exist"
-        exit 1
-    fi
-    
-    echo "Secret details:"
-    kubectl get secret $secret_name -n $namespace -o yaml
-    
-    echo
-    echo "Decoded values:"
-    kubectl get secret $secret_name -n $namespace -o json | \
-        jq -r '.data | map_values(@base64d)'
-}
-
-# Function to list secrets
-list_secrets() {
-    local namespace=${1:-app}
-    
-    echo "Secrets in namespace $namespace:"
-    kubectl get secrets -n $namespace
-}
-
-# Function to generate a secure random string
-generate_secure_string() {
-    local length=${1:-32}
-    openssl rand -base64 $length | tr -dc 'a-zA-Z0-9!@#$%^&*()-_=+' | head -c $length
-}
-
-# Function to rotate secret values
-rotate_secrets() {
-    local secret_name=$1
-    local namespace=${2:-app}
-    
-    validate_input $secret_name
-    
-    if ! kubectl get secret $secret_name -n $namespace &> /dev/null; then
-        echo "Error: Secret $secret_name does not exist"
-        exit 1
-    fi
-    
-    case $secret_name in
-        postgres-secret)
-            # Generate new PostgreSQL password
-            local new_password=$(generate_secure_string 32)
-            
-            echo "Rotating PostgreSQL credentials"
-            kubectl create secret generic $secret_name \
-                --from-literal=POSTGRES_PASSWORD=$new_password \
-                --from-literal=POSTGRES_USER=postgres \
-                -n $namespace \
-                -o yaml \
-                --dry-run=client | \
-            kubectl replace -f -
-            
-            # Update applications that use the database
-            kubectl rollout restart deployment/flask-backend -n $namespace
-            kubectl rollout restart deployment/node-backend -n $namespace
-            ;;
-            
-        jwt-secret)
-            # Generate new JWT secret key
-            local new_jwt_secret=$(generate_secure_string 64)
-            
-            echo "Rotating JWT secret key"
-            
-            # Get the current secret
-            local tmp_file=$(mktemp)
-            kubectl get secret $secret_name -n $namespace -o json > $tmp_file
-            
-            # Update the JWT_SECRET_KEY
-            cat $tmp_file | jq --arg value "$(echo -n "$new_jwt_secret" | base64 -w 0)" \
-                '.data["JWT_SECRET_KEY"] = $value' > ${tmp_file}.new
-            mv ${tmp_file}.new $tmp_file
-            
-            # Apply the updated secret
-            kubectl apply -f $tmp_file -n $namespace
-            
-            # Clean up
-            rm $tmp_file
-            
-            echo "JWT secret key rotated successfully"
-            echo "Restarting services to apply new JWT secret key..."
-            
-            # Restart services in a staggered manner to avoid downtime
-            # First restart auth service
-            if kubectl get deployment/auth-service -n $namespace &> /dev/null; then
-                kubectl rollout restart deployment/auth-service -n $namespace
-                echo "Waiting for auth-service to restart..."
-                kubectl rollout status deployment/auth-service -n $namespace --timeout=120s
-            fi
-            
-            # Then restart other services
-            if kubectl get deployment/flask-service -n $namespace &> /dev/null; then
-                kubectl rollout restart deployment/flask-service -n $namespace
-            fi
-            
-            if kubectl get deployment/node-service -n $namespace &> /dev/null; then
-                kubectl rollout restart deployment/node-service -n $namespace
-            fi
-            
-            echo "All services restarted with new JWT secret key"
-            ;;
-            
-        *)
-            echo "Error: Rotation not implemented for secret $secret_name"
-            exit 1
-            ;;
-    esac
-    
-    if [ $? -eq 0 ]; then
-        echo "Secret rotation completed successfully"
-    else
-        echo "Error: Failed to rotate secret"
-        exit 1
-    fi
-}
-
-# Parse command line arguments
-if [ $# -lt 1 ]; then
-    usage
-fi
-
-command=$1
-shift
-
-namespace="app"
-secret_name=""
-key=""
-value=""
-file=""
-
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -n|--namespace)
-            namespace="$2"
-            shift 2
-            ;;
-        -s|--secret)
-            secret_name="$2"
-            shift 2
-            ;;
-        -k|--key)
-            key="$2"
-            shift 2
-            ;;
-        -v|--value)
-            value="$2"
-            shift 2
-            ;;
-        -f|--file)
-            file="$2"
-            shift 2
-            ;;
-        *)
-            echo "Unknown option: $1"
-            usage
-            ;;
-    esac
-done
-
-case $command in
-    create)
-        if [ -z "$secret_name" ] || [ -z "$key" ] || [ -z "$value" ]; then
-            echo "Error: Secret name, key, and value are required for create command"
-            usage
-        fi
-        create_secret $secret_name $key $value $namespace
-        ;;
-    update)
-        if [ -z "$secret_name" ] || [ -z "$file" ]; then
-            echo "Error: Secret name and file are required for update command"
-            usage
-        fi
-        update_secret $secret_name $namespace $file
-        ;;
-    delete)
-        if [ -z "$secret_name" ]; then
-            echo "Error: Secret name is required for delete command"
-            usage
-        fi
-        delete_secret $secret_name $namespace
-        ;;
-    view)
-        if [ -z "$secret_name" ]; then
-            echo "Error: Secret name is required for view command"
-            usage
-        fi
-        view_secret $secret_name $namespace
-        ;;
-    list)
-        list_secrets $namespace
-        ;;
-    rotate)
-        if [ -z "$secret_name" ]; then
-            echo "Error: Secret name is required for rotate command"
-            usage
-        fi
-        rotate_secrets $secret_name $namespace
-        ;;
-    *)
-        echo "Unknown command: $command"
-        usage
-        ;;
-esac 
-```
-
-
-### FILE: k8s\scripts\monitor-debug.sh
-```
-#!/bin/bash
-
-# Function to display usage
-usage() {
-    echo "Usage: $0 [command] [service] [options]"
-    echo
-    echo "Commands:"
-    echo "  logs       View logs for a service"
-    echo "  describe   Describe a resource"
-    echo "  events     View events"
-    echo "  metrics    View metrics"
-    echo "  status     View status of all resources"
-    echo "  port-forward  Forward ports for a service"
-    echo
-    echo "Services:"
-    echo "  frontend       Frontend service"
-    echo "  flask-backend  Flask backend service"
-    echo "  node-backend   Node.js backend service"
-    echo "  postgres      PostgreSQL database"
-    echo "  grafana       Grafana monitoring"
-    echo "  prometheus    Prometheus monitoring"
-    echo "  kibana        Kibana logging"
-    echo
-    echo "Options:"
-    echo "  -n, --namespace  Namespace (default: app)"
-    echo "  -f, --follow     Follow logs"
-    echo "  -t, --tail       Number of lines to show (default: 100)"
-    echo "  -p, --port       Port to forward to (required for port-forward)"
-    echo
-    echo "Examples:"
-    echo "  $0 logs frontend -f"
-    echo "  $0 describe pod flask-backend"
-    echo "  $0 metrics node-backend"
-    echo "  $0 port-forward grafana -p 3000"
-    exit 1
-}
-
-# Function to get pod name
-get_pod_name() {
-    local service=$1
-    local namespace=${2:-app}
-    kubectl get pods -n $namespace -l app=$service -o jsonpath="{.items[0].metadata.name}"
-}
-
-# Function to view logs
-view_logs() {
-    local service=$1
-    local namespace=${2:-app}
-    local follow=$3
-    local tail=${4:-100}
-    
-    local pod=$(get_pod_name $service $namespace)
-    if [ -z "$pod" ]; then
-        echo "Error: No pods found for service $service in namespace $namespace"
-        exit 1
-    fi
-    
-    if [ "$follow" = true ]; then
-        kubectl logs -f -n $namespace $pod --tail=$tail
-    else
-        kubectl logs -n $namespace $pod --tail=$tail
-    fi
-}
-
-# Function to describe resource
-describe_resource() {
-    local resource_type=$1
-    local resource_name=$2
-    local namespace=${3:-app}
-    
-    kubectl describe $resource_type $resource_name -n $namespace
-}
-
-# Function to view events
-view_events() {
-    local namespace=${1:-app}
-    
-    kubectl get events -n $namespace --sort-by='.lastTimestamp'
-}
-
-# Function to view metrics
-view_metrics() {
-    local service=$1
-    local namespace=${2:-app}
-    
-    local pod=$(get_pod_name $service $namespace)
-    if [ -z "$pod" ]; then
-        echo "Error: No pods found for service $service in namespace $namespace"
-        exit 1
-    fi
-    
-    echo "Pod Metrics:"
-    kubectl top pod $pod -n $namespace
-    
-    echo
-    echo "Node Metrics:"
-    kubectl top node
-}
-
-# Function to view status
-view_status() {
-    local namespace=${1:-app}
-    
-    echo "Deployments:"
-    kubectl get deployments -n $namespace
-    
-    echo
-    echo "Pods:"
-    kubectl get pods -n $namespace
-    
-    echo
-    echo "Services:"
-    kubectl get services -n $namespace
-    
-    echo
-    echo "HPAs:"
-    kubectl get hpa -n $namespace
-    
-    echo
-    echo "Network Policies:"
-    kubectl get networkpolicies -n $namespace
-}
-
-# Function to port forward
-port_forward() {
-    local service=$1
-    local port=$2
-    local namespace=${3:-app}
-    
-    echo "Port forwarding service $service to localhost:$port"
-    kubectl port-forward -n $namespace svc/$service $port:$port
-}
-
-# Parse command line arguments
-if [ $# -lt 2 ]; then
-    usage
-fi
-
-command=$1
-service=$2
-shift 2
-
-namespace="app"
-follow=false
-tail=100
-port=""
-
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        -n|--namespace)
-            namespace="$2"
-            shift 2
-            ;;
-        -f|--follow)
-            follow=true
-            shift
-            ;;
-        -t|--tail)
-            tail="$2"
-            shift 2
-            ;;
-        -p|--port)
-            port="$2"
-            shift 2
-            ;;
-        *)
-            echo "Unknown option: $1"
-            usage
-            ;;
-    esac
-done
-
-case $command in
-    logs)
-        view_logs $service $namespace $follow $tail
-        ;;
-    describe)
-        describe_resource pod $service $namespace
-        ;;
-    events)
-        view_events $namespace
-        ;;
-    metrics)
-        view_metrics $service $namespace
-        ;;
-    status)
-        view_status $namespace
-        ;;
-    port-forward)
-        if [ -z "$port" ]; then
-            echo "Error: Port is required for port-forward command"
-            usage
-        fi
-        port_forward $service $port $namespace
-        ;;
-    *)
-        echo "Unknown command: $command"
-        usage
-        ;;
-esac 
-```
-
-
-### FILE: k8s\scripts\scale.sh
-```
-#!/bin/bash
-
-# Function to display usage
-usage() {
-    echo "Usage: $0 [manual|auto] [service] [options]"
-    echo
-    echo "Commands:"
-    echo "  manual  Manually scale a deployment"
-    echo "  auto    Configure autoscaling for a deployment"
-    echo
-    echo "Services:"
-    echo "  frontend       Frontend service"
-    echo "  flask-backend  Flask backend service"
-    echo "  node-backend   Node.js backend service"
-    echo
-    echo "Options for manual scaling:"
-    echo "  -r, --replicas  Number of replicas (required)"
-    echo
-    echo "Options for autoscaling:"
-    echo "  --min          Minimum number of replicas (required)"
-    echo "  --max          Maximum number of replicas (required)"
-    echo "  --cpu          Target CPU utilization percentage (default: 70)"
-    echo "  --memory       Target memory utilization percentage (default: 80)"
-    echo
-    echo "Examples:"
-    echo "  $0 manual frontend -r 3"
-    echo "  $0 auto flask-backend --min 2 --max 5 --cpu 75 --memory 85"
-    exit 1
-}
-
-# Function to check if a deployment exists
-check_deployment() {
-    local deployment=$1
-    if ! kubectl get deployment $deployment &> /dev/null; then
-        echo "Error: Deployment $deployment not found"
-        exit 1
-    fi
-}
-
-# Function to manually scale a deployment
-scale_deployment() {
-    local deployment=$1
-    local replicas=$2
-    
-    echo "Scaling deployment $deployment to $replicas replicas"
-    kubectl scale deployment/$deployment --replicas=$replicas
-    
-    echo "Waiting for scaling to complete..."
-    kubectl rollout status deployment/$deployment --timeout=300s
-    
-    echo "Current deployment status:"
-    kubectl get deployment $deployment
-}
-
-# Function to configure autoscaling
-configure_autoscaling() {
-    local deployment=$1
-    local min_replicas=$2
-    local max_replicas=$3
-    local cpu_target=${4:-70}
-    local memory_target=${5:-80}
-    
-    echo "Configuring autoscaling for deployment $deployment"
-    echo "Min replicas: $min_replicas"
-    echo "Max replicas: $max_replicas"
-    echo "CPU target: $cpu_target%"
-    echo "Memory target: $memory_target%"
-    
-    # Delete existing HPA if it exists
-    kubectl delete hpa $deployment 2>/dev/null || true
-    
-    # Create new HPA
-    kubectl autoscale deployment $deployment \
-        --min=$min_replicas \
-        --max=$max_replicas \
-        --cpu-percent=$cpu_target
-    
-    # Add memory target using patch
-    kubectl patch hpa $deployment --patch "{
-        \"spec\": {
-            \"metrics\": [
-                {
-                    \"type\": \"Resource\",
-                    \"resource\": {
-                        \"name\": \"memory\",
-                        \"target\": {
-                            \"type\": \"Utilization\",
-                            \"averageUtilization\": $memory_target
-                        }
-                    }
-                }
-            ]
-        }
-    }"
-    
-    echo "Autoscaling configuration complete"
-    echo
-    echo "Current HPA status:"
-    kubectl get hpa $deployment
-}
-
-# Parse command line arguments
-if [ $# -lt 2 ]; then
-    usage
-fi
-
-command=$1
-service=$2
-shift 2
-
-case $command in
-    manual)
-        while [[ $# -gt 0 ]]; do
-            case $1 in
-                -r|--replicas)
-                    replicas="$2"
-                    shift 2
-                    ;;
-                *)
-                    echo "Unknown option: $1"
-                    usage
-                    ;;
-            esac
-        done
-        
-        if [ -z "$replicas" ]; then
-            echo "Error: Number of replicas is required for manual scaling"
-            usage
-        fi
-        
-        check_deployment $service
-        scale_deployment $service $replicas
-        ;;
-        
-    auto)
-        while [[ $# -gt 0 ]]; do
-            case $1 in
-                --min)
-                    min_replicas="$2"
-                    shift 2
-                    ;;
-                --max)
-                    max_replicas="$2"
-                    shift 2
-                    ;;
-                --cpu)
-                    cpu_target="$2"
-                    shift 2
-                    ;;
-                --memory)
-                    memory_target="$2"
-                    shift 2
-                    ;;
-                *)
-                    echo "Unknown option: $1"
-                    usage
-                    ;;
-            esac
-        done
-        
-        if [ -z "$min_replicas" ] || [ -z "$max_replicas" ]; then
-            echo "Error: Both minimum and maximum replicas are required for autoscaling"
-            usage
-        fi
-        
-        check_deployment $service
-        configure_autoscaling $service $min_replicas $max_replicas $cpu_target $memory_target
-        ;;
-        
-    *)
-        echo "Unknown command: $command"
-        usage
-        ;;
-esac 
-```
-
-
-### FILE: k8s\scripts\update-rollback.sh
-```
-#!/bin/bash
-
-# Function to display usage
-usage() {
-    echo "Usage: $0 [update|rollback] [service] [options]"
-    echo
-    echo "Commands:"
-    echo "  update   Update a service to a new version"
-    echo "  rollback Roll back a service to a previous version"
-    echo
-    echo "Services:"
-    echo "  frontend       Frontend service"
-    echo "  flask-backend  Flask backend service"
-    echo "  node-backend   Node.js backend service"
-    echo
-    echo "Options:"
-    echo "  -i, --image   New image for update (required for update)"
-    echo "  -r, --revision Revision to rollback to (required for rollback)"
-    echo
-    echo "Examples:"
-    echo "  $0 update frontend -i myregistry/frontend:v2"
-    echo "  $0 rollback flask-backend -r 1"
-    exit 1
-}
-
-# Function to check if a deployment exists
-check_deployment() {
-    local deployment=$1
-    if ! kubectl get deployment $deployment &> /dev/null; then
-        echo "Error: Deployment $deployment not found"
-        exit 1
-    fi
-}
-
-# Function to update a deployment
-update_deployment() {
-    local deployment=$1
-    local image=$2
-    
-    echo "Updating deployment $deployment with image $image"
-    kubectl set image deployment/$deployment $deployment=$image
-    
-    echo "Waiting for rollout to complete..."
-    if ! kubectl rollout status deployment/$deployment --timeout=300s; then
-        echo "Rollout failed! Rolling back..."
-        kubectl rollout undo deployment/$deployment
-        exit 1
-    fi
-    
-    echo "Update successful!"
-}
-
-# Function to rollback a deployment
-rollback_deployment() {
-    local deployment=$1
-    local revision=$2
-    
-    echo "Rolling back deployment $deployment to revision $revision"
-    kubectl rollout undo deployment/$deployment --to-revision=$revision
-    
-    echo "Waiting for rollback to complete..."
-    if ! kubectl rollout status deployment/$deployment --timeout=300s; then
-        echo "Rollback failed!"
-        exit 1
-    fi
-    
-    echo "Rollback successful!"
-}
-
-# Parse command line arguments
-if [ $# -lt 2 ]; then
-    usage
-fi
-
-command=$1
-service=$2
-shift 2
-
-case $command in
-    update)
-        while [[ $# -gt 0 ]]; do
-            case $1 in
-                -i|--image)
-                    image="$2"
-                    shift 2
-                    ;;
-                *)
-                    echo "Unknown option: $1"
-                    usage
-                    ;;
-            esac
-        done
-        
-        if [ -z "$image" ]; then
-            echo "Error: Image is required for update"
-            usage
-        fi
-        
-        check_deployment $service
-        update_deployment $service $image
-        ;;
-        
-    rollback)
-        while [[ $# -gt 0 ]]; do
-            case $1 in
-                -r|--revision)
-                    revision="$2"
-                    shift 2
-                    ;;
-                *)
-                    echo "Unknown option: $1"
-                    usage
-                    ;;
-            esac
-        done
-        
-        if [ -z "$revision" ]; then
-            echo "Error: Revision is required for rollback"
-            usage
-        fi
-        
-        check_deployment $service
-        rollback_deployment $service $revision
-        ;;
-        
-    *)
-        echo "Unknown command: $command"
-        usage
-        ;;
-esac
-
-# Display deployment status
-echo
-echo "Current deployment status:"
-kubectl get deployment $service
-echo
-echo "Deployment history:"
-kubectl rollout history deployment/$service 
+export default runtimeConfig; 
 ```
 
 
@@ -30947,6 +27419,14 @@ Base schemas for API responses.
 from typing import Optional, Dict, Any
 from pydantic import BaseModel
 
+class BaseSchema(BaseModel):
+    """Base schema that all other schemas should inherit from."""
+    class Config:
+        orm_mode = True
+        validate_assignment = True
+        arbitrary_types_allowed = True
+        extra = "forbid"
+
 class ErrorResponse(BaseModel):
     """Standard error response model."""
     error: str
@@ -32024,6 +28504,104 @@ __all__ = []
 ```
 
 
+### FILE: meeting_shared\utils\database.py
+```
+"""
+Shared database utilities for transaction management across services.
+"""
+from contextlib import contextmanager
+from sqlalchemy.orm import Session
+from functools import wraps
+from typing import Any, Callable, Optional, TypeVar, Dict, List, Union
+import logging
+
+logger = logging.getLogger(__name__)
+
+T = TypeVar('T')
+
+@contextmanager
+def transaction_context(session: Session):
+    """
+    Context manager for database transactions.
+    Commits the transaction if no exceptions occur, rolls back otherwise.
+    
+    Args:
+        session: SQLAlchemy session object
+        
+    Yields:
+        The session object
+    """
+    try:
+        yield session
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Transaction error: {str(e)}")
+        raise
+
+def with_transaction(func):
+    """
+    Decorator for functions that need a transaction.
+    Automatically commits or rolls back the transaction.
+    
+    Args:
+        func: The function to decorate
+        
+    Returns:
+        The decorated function
+    """
+    @wraps(func)
+    def wrapper(session, *args, **kwargs):
+        with transaction_context(session) as tx_session:
+            return func(tx_session, *args, **kwargs)
+    return wrapper
+
+class DatabaseManager:
+    """
+    Database utility class for managing database operations.
+    Provides a unified interface for database operations across services.
+    """
+    def __init__(self, db):
+        self.db = db
+        self.session = db.session
+        self.logger = logging.getLogger(__name__)
+    
+    def commit(self) -> bool:
+        """Safely commit database changes"""
+        try:
+            self.session.commit()
+            return True
+        except Exception as e:
+            self.session.rollback()
+            self.logger.error(f"Database commit error: {str(e)}")
+            return False
+            
+    def add(self, obj: Any, auto_commit: bool = True) -> bool:
+        """Safely add an object to the database"""
+        try:
+            self.session.add(obj)
+            if auto_commit:
+                return self.commit()
+            return True
+        except Exception as e:
+            self.session.rollback()
+            self.logger.error(f"Database add error: {str(e)}")
+            return False
+            
+    def delete(self, obj: Any, auto_commit: bool = True) -> bool:
+        """Safely delete an object from the database"""
+        try:
+            self.session.delete(obj)
+            if auto_commit:
+                return self.commit()
+            return True
+        except Exception as e:
+            self.session.rollback()
+            self.logger.error(f"Database delete error: {str(e)}")
+            return False 
+```
+
+
 ### FILE: monitoring\prometheus\prometheus.yml
 ```
 global:
@@ -32951,7 +29529,7 @@ if __name__ == "__main__":
 
 
 ## SUMMARY
-- Total files found: 252
-- Files processed: 246
-- Files skipped: 6
+- Total files found: 222
+- Files processed: 214
+- Files skipped: 8
 - Script version: 1.1.0
