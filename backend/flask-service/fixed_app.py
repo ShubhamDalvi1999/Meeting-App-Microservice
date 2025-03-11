@@ -58,22 +58,22 @@ logger.info(f"Updated sys.path: {sys.path}")
 try:
     # Try absolute import first (when PYTHONPATH includes shared)
     logger.info("Attempting to import shared modules using absolute import...")
-    from shared.database import db, init_db
-    from shared.middleware.error_handler import handle_api_errors
-    from shared.middleware.validation import validate_schema
-    from shared.middleware.rate_limiter import RateLimiter
-    from shared.config import config
+    from meeting_shared.database import db, init_db
+    from meeting_shared.middleware.error_handler import handle_api_errors
+    from meeting_shared.middleware.validation import validate_schema
+    from meeting_shared.middleware.rate_limiter import RateLimiter
+    from meeting_shared.config import config
     logger.info("Successfully imported shared modules using absolute import")
 except ImportError as e:
     logger.warning(f"Absolute import failed: {e}, trying relative import")
     try:
         # Fallback to relative path
         logger.info("Attempting to import shared modules using relative import...")
-        from backend.shared.database import db, init_db
-        from backend.shared.middleware.error_handler import handle_api_errors
-        from backend.shared.middleware.validation import validate_schema
-        from backend.shared.middleware.rate_limiter import RateLimiter
-        from backend.shared.config import config
+        from meeting_shared.database import db, init_db
+        from meeting_shared.middleware.error_handler import handle_api_errors
+        from meeting_shared.middleware.validation import validate_schema
+        from meeting_shared.middleware.rate_limiter import RateLimiter
+        from meeting_shared.config import config
         logger.info("Successfully imported shared modules using relative import")
     except ImportError as e:
         logger.error(f"All import approaches failed: {e}")

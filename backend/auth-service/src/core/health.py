@@ -13,12 +13,12 @@ from datetime import datetime
 from flask import Blueprint, jsonify, current_app, request, g
 
 from .config import get_config
+from meeting_shared.middleware.request_id import get_request_id
 
 logger = logging.getLogger(__name__)
 
 # Try to import request ID functionality
 try:
-    from backend.shared.middleware.request_id import get_request_id
     HAS_REQUEST_ID = True
 except ImportError:
     HAS_REQUEST_ID = False

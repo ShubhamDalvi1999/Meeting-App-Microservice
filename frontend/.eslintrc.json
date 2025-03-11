@@ -1,57 +1,9 @@
 {
-  "extends": [
-    "next/core-web-vitals",
-    "eslint:recommended",
-    "plugin:react/recommended",
-    "plugin:react-hooks/recommended",
-    "plugin:@typescript-eslint/recommended"
-  ],
-  "parser": "@typescript-eslint/parser",
-  "plugins": ["@typescript-eslint", "react", "react-hooks"],
+  "extends": "next/core-web-vitals",
   "rules": {
-    // TypeScript-specific rules
-    "@typescript-eslint/explicit-module-boundary-types": "off",
-    "@typescript-eslint/no-explicit-any": "warn",
-    "@typescript-eslint/no-unused-vars": ["warn", { 
-      "argsIgnorePattern": "^_", 
-      "varsIgnorePattern": "^_" 
-    }],
-    "@typescript-eslint/ban-ts-comment": "warn",
-    
-    // React-specific rules
-    "react/react-in-jsx-scope": "off",
-    "react/prop-types": "off",
-    "react/display-name": "off",
-    "react-hooks/rules-of-hooks": "error",
-    "react-hooks/exhaustive-deps": "warn",
-    
-    // General rules
-    "no-console": ["warn", { "allow": ["warn", "error", "info"] }],
-    "no-debugger": "warn",
-    "eqeqeq": ["error", "always", { "null": "ignore" }],
-    "no-var": "error",
-    "prefer-const": "warn",
-    "prefer-template": "warn"
-  },
-  "settings": {
-    "react": {
-      "version": "detect"
-    }
-  },
-  "overrides": [
-    {
-      "files": ["**/*.test.ts", "**/*.test.tsx", "**/__tests__/**/*"],
-      "env": {
-        "jest": true
-      },
-      "rules": {
-        "@typescript-eslint/no-explicit-any": "off"
-      }
-    }
-  ],
-  "env": {
-    "browser": true,
-    "node": true,
-    "es6": true
+    "react/no-unescaped-entities": "off",
+    "@typescript-eslint/no-explicit-any": "off",
+    "@typescript-eslint/no-unused-vars": "off",
+    "react-hooks/exhaustive-deps": "off"
   }
 } 

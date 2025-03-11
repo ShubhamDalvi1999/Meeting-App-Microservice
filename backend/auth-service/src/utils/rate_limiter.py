@@ -5,7 +5,7 @@ backward compatibility with code that imports from here.
 
 import logging
 from functools import wraps
-from shared.middleware.rate_limiter import RateLimiter, rate_limit as shared_rate_limit
+from meeting_shared.middleware.rate_limiter import RateLimiter, rate_limit as shared_rate_limit
 
 logger = logging.getLogger(__name__)
 

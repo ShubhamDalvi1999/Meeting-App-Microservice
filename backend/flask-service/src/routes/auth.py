@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 from werkzeug.security import generate_password_hash
 import jwt
 import datetime
-from datetime import UTC
+from datetime import timezone
 import os
 import re
 from sqlalchemy.exc import IntegrityError
@@ -114,8 +114,8 @@ def register():
         token = jwt.encode({
             'user_id': user.id,
             'email': user.email,
-            'exp': datetime.datetime.now(UTC) + datetime.timedelta(days=token_expiry),
-            'iat': datetime.datetime.now(UTC),
+            'exp': datetime.datetime.now(timezone.utc) + datetime.timedelta(days=token_expiry),
+            'iat': datetime.datetime.now(timezone.utc),
             'type': 'access'
         }, os.getenv('JWT_SECRET_KEY'), algorithm='HS256')
         
@@ -171,8 +171,8 @@ def login():
         token = jwt.encode({
             'user_id': user.id,
             'email': user.email,
-            'exp': datetime.datetime.now(UTC) + datetime.timedelta(days=token_expiry),
-            'iat': datetime.datetime.now(UTC),
+            'exp': datetime.datetime.now(timezone.utc) + datetime.timedelta(days=token_expiry),
+            'iat': datetime.datetime.now(timezone.utc),
             'type': 'access'
         }, os.getenv('JWT_SECRET_KEY'), algorithm='HS256')
         

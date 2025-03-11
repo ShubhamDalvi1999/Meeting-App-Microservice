@@ -11,10 +11,10 @@ from sqlalchemy.exc import SQLAlchemyError
 
 # Handle import based on whether we're using the application db or directly importing
 try:
-    from ..database import db
+    from ..utils.database import db
 except ImportError:
     try:
-        from shared.database import db
+        from meeting_shared.database import db
     except ImportError:
         db = None
         logging.error("Failed to import database module")

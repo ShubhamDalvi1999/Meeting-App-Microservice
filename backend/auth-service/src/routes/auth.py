@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app, g
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import bcrypt
 import jwt
 from google.oauth2 import id_token
@@ -7,11 +7,11 @@ from google.auth.transport import requests as google_requests
 import re
 import secrets
 from ..models.auth import AuthUser, PasswordResetToken, UserSession, EmailVerification
-from shared.database import db, transaction
-from shared.middleware.validation import validate_schema
-from shared.middleware.rate_limiter import rate_limit
-from shared.middleware.auth import jwt_required
-from shared.schemas.base import ErrorResponse, SuccessResponse
+from meeting_shared.database import db, transaction
+from meeting_shared.middleware.validation import validate_schema
+from meeting_shared.middleware.rate_limiter import rate_limit
+from meeting_shared.middleware.auth import jwt_required
+from meeting_shared.schemas.base import ErrorResponse, SuccessResponse
 from ..schemas.auth import (
     AuthUserCreate, AuthUserUpdate, AuthUserResponse, SessionCreate,
     EmailVerificationCreate, AuthUserLogin, GoogleLogin, PasswordReset,
@@ -211,7 +211,7 @@ def google_login(data: GoogleLogin):
             
             # Create session
             session = user.create_session(data.device_info)
-            user.last_login = datetime.utcnow()
+            user.last_login = datetime.utcnow().replace(tzinfo=timezone.utc)
             
             return jsonify(SuccessResponse(
                 message="Google login successful",
@@ -300,7 +300,7 @@ def confirm_reset_password(data: PasswordResetConfirm):
             # Revoke all sessions
             UserSession.query.filter_by(user_id=user.id).update({
                 'revoked': True,
-                'revoked_at': datetime.utcnow(),
+                'revoked_at': datetime.utcnow().replace(tzinfo=timezone.utc),
                 'revocation_reason': 'Password reset'
             })
             
@@ -429,7 +429,7 @@ def revoke_all_sessions():
                 UserSession.revoked == False
             ).update({
                 'revoked': True,
-                'revoked_at': datetime.utcnow(),
+                'revoked_at': datetime.utcnow().replace(tzinfo=timezone.utc),
                 'revocation_reason': 'User revoked all sessions'
             })
             
@@ -452,7 +452,7 @@ def logout():
         current_session = get_current_session()
         
         with transaction():
-            current_session.revoke(reason="User logout")
+            current_session.revoke(reason="User logout", revoked_at=datetime.utcnow().replace(tzinfo=timezone.utc))
             
             return jsonify(SuccessResponse(
                 message="Logged out successfully"

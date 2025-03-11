@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 # Try to import standardized errors from shared module
 try:
-    # Try to import from backend.shared first
-    from backend.shared.errors import (
+    # Try to import from backend.meeting_shared first
+    from backend.meeting_shared.errors import (
         APIError, ValidationError, AuthenticationError, AuthorizationError,
         UserExistsError, UserNotFoundError, TokenError, ResourceNotFoundError,
         ResourceExistsError, ServiceError, ConfigurationError, DependencyError,
@@ -25,8 +25,8 @@ try:
     logger.info("Successfully imported shared error classes")
 except ImportError:
     try:
-        # Try to import from shared as fallback
-        from shared.errors import (
+        # Try to import from meeting_shared as fallback
+        from meeting_shared.errors import (
             APIError, ValidationError, AuthenticationError, AuthorizationError,
             UserExistsError, UserNotFoundError, TokenError, ResourceNotFoundError,
             ResourceExistsError, ServiceError, ConfigurationError, DependencyError,
@@ -40,11 +40,11 @@ except ImportError:
         
         # Try to import request ID functionality
         try:
-            from backend.shared.middleware.request_id import get_request_id
+            from backend.meeting_shared.middleware.request_id import get_request_id
             HAS_REQUEST_ID = True
         except ImportError:
             try:
-                from shared.middleware.request_id import get_request_id
+                from meeting_shared.middleware.request_id import get_request_id
                 HAS_REQUEST_ID = True
             except ImportError:
                 HAS_REQUEST_ID = False

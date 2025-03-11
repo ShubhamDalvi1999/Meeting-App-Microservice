@@ -5,6 +5,7 @@ Tests the complete authentication flow including registration, login, and token 
 
 import json
 import os
+import requests
 from .base import IntegrationTestBase
 import responses
 
@@ -21,7 +22,7 @@ class TestAuthFlow(IntegrationTestBase):
         sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
         
         # Import the create_app function
-        from app import create_app
+        from src.app import create_app
         
         # Create the app with test configuration
         app = create_app('testing')
@@ -210,7 +211,7 @@ class TestAuthFlow(IntegrationTestBase):
         
         # Create a service token
         with self.app.app_context():
-            from src.services.token_service import create_service_token
+            from src.utils.token_service import create_service_token
             service_token = create_service_token('auth-service', 'backend')
         
         # Call the backend service with the service token

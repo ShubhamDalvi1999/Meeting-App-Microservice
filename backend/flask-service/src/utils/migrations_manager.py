@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 import time
 from datetime import datetime
-from shared.utils.migrations_manager import MigrationsManager as SharedMigrationsManager
+from meeting_shared.utils.migrations_manager import MigrationsManager as SharedMigrationsManager
 
 logger = logging.getLogger(__name__)
 

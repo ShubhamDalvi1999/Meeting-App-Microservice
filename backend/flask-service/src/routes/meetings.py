@@ -1,13 +1,13 @@
 from flask import Blueprint, request, jsonify, current_app
 from sqlalchemy.exc import SQLAlchemyError
-from datetime import datetime, timezone, UTC
+from datetime import datetime, timezone
 import bleach
 import json
 import time
-from shared.middleware.auth import token_required
-from shared.middleware.error_handler import error_handler, APIError
-from shared.middleware.validation import validate_schema
-from shared.schemas.base import ErrorResponse, SuccessResponse
+from meeting_shared.middleware.auth import jwt_required
+from meeting_shared.middleware.error_handler import error_handler, APIError
+from meeting_shared.middleware.validation import validate_schema
+from meeting_shared.schemas.base import ErrorResponse, SuccessResponse
 from ..schemas.meeting import MeetingCreate, MeetingResponse, MeetingUpdate
 from ..models import db, User, Meeting, MeetingParticipant, MeetingCoHost, MeetingAuditLog
 from ..utils.auth_integration import enhanced_token_required
@@ -81,7 +81,7 @@ def create_meeting(current_user):
     except ValueError:
         raise APIError('Invalid datetime format. Please use ISO format', 400)
 
-    current_time = datetime.now(UTC)
+    current_time = datetime.now(timezone.utc)
     
     # Enhanced time validations
     if start_time < current_time:
@@ -210,7 +210,7 @@ def join_meeting(current_user, id):
             return jsonify({'error': 'Meeting has already ended'}), 400
 
         # Check if meeting hasn't started yet
-        current_time = datetime.now(UTC)
+        current_time = datetime.now(timezone.utc)
         if current_time < meeting.start_time:
             time_until_start = (meeting.start_time - current_time).total_seconds()
             if time_until_start > 300:  # More than 5 minutes before start
@@ -401,7 +401,7 @@ def delete_meeting(current_user, id):
         raise APIError('You do not have permission to delete this meeting', 403)
         
     # If meeting has started, mark as ended instead of deleting
-    current_time = datetime.now(UTC)
+    current_time = datetime.now(timezone.utc)
     if meeting.start_time <= current_time:
         meeting.ended_at = current_time
         
@@ -459,7 +459,7 @@ def get_meeting_stats(current_user):
         return jsonify(cached_stats)
         
     # Calculate stats
-    current_time = datetime.now(UTC)
+    current_time = datetime.now(timezone.utc)
     
     # Active meetings where user is creator
     active_hosted = Meeting.query.filter(

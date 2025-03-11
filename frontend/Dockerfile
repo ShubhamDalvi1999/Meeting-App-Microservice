@@ -3,11 +3,24 @@ FROM node:18-slim AS builder
 
 WORKDIR /app
 
+# Set environment variables for build
+ENV NEXT_PUBLIC_API_URL=http://localhost:5000
+ENV NEXT_PUBLIC_AUTH_URL=http://localhost:5001
+ENV NEXT_PUBLIC_WS_URL=ws://localhost:3001
+ENV NEXT_PUBLIC_APP_NAME="Meeting App"
+ENV NEXT_PUBLIC_APP_VERSION=1.0.0
+ENV NEXT_PUBLIC_ENABLE_ANALYTICS=false
+ENV NEXT_PUBLIC_ENABLE_DEBUG_TOOLS=false
+ENV NEXT_PUBLIC_API_TIMEOUT_MS=30000
+ENV NEXT_PUBLIC_WS_RECONNECT_INTERVAL_MS=5000
+ENV NEXT_PUBLIC_MAX_UPLOAD_SIZE_MB=5
+
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
+# Install dependencies and ensure React types are installed
 RUN npm install
+RUN npm install --save-dev @types/react @types/react-dom
 
 # Create necessary directories
 RUN mkdir -p /app/public /app/src
@@ -30,6 +43,9 @@ WORKDIR /app
 # Set environment variables
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV NEXT_PUBLIC_API_URL=http://localhost:5000
+ENV NEXT_PUBLIC_AUTH_URL=http://localhost:5001
+ENV NEXT_PUBLIC_WS_URL=ws://localhost:3001
 
 # Create public directory if it doesn't exist
 RUN mkdir -p public

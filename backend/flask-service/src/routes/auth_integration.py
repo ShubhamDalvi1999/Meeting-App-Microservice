@@ -1,10 +1,10 @@
 from flask import Blueprint, request, jsonify, current_app
 from functools import wraps
 from ..utils.auth_integration import AuthIntegration
-from shared.middleware.auth import service_auth_required
-from shared.middleware.validation import validate_schema
-from shared.schemas.base import ErrorResponse, SuccessResponse
-from shared.database import transaction_context
+from meeting_shared.middleware.auth import service_auth_required
+from meeting_shared.middleware.validation import validate_schema
+from meeting_shared.schemas.base import ErrorResponse, SuccessResponse
+from meeting_shared.database import transaction_context
 import logging
 
 logger = logging.getLogger(__name__)

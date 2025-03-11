@@ -1,9 +1,10 @@
-from shared.database import transaction_context
-from shared.utils.database import with_transaction, DatabaseManager
-from shared.middleware.validation import validate_schema
+from meeting_shared.database import transaction_context
+from meeting_shared.utils.database import with_transaction, DatabaseManager
+from meeting_shared.middleware.validation import validate_schema
 from flask import current_app
 from sqlalchemy.exc import SQLAlchemyError
 import logging
+from meeting_shared.database import db
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,6 @@ def get_db_manager():
     """Get or create database manager instance"""
     global db_manager
     if db_manager is None:
-        from shared.database import db
         db_manager = DatabaseManager(db)
     return db_manager
 

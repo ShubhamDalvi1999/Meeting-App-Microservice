@@ -1,4 +1,4 @@
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from .. import db
 from ..schemas.participant import ParticipantCreate, ParticipantUpdate, ParticipantResponse
 
@@ -13,8 +13,8 @@ class MeetingParticipant(db.Model):
     joined_at = db.Column(db.DateTime, nullable=True)
     left_at = db.Column(db.DateTime, nullable=True)
     is_banned = db.Column(db.Boolean, nullable=False, default=False)
-    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(UTC))
-    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Additional fields for participation tracking
     total_time = db.Column(db.Integer, nullable=True)  # Total time spent in meeting in seconds
@@ -64,13 +64,13 @@ class MeetingParticipant(db.Model):
 
     def record_join(self, connection_quality: float = None):
         """Record participant joining the meeting"""
-        self.joined_at = datetime.now(UTC)
+        self.joined_at = datetime.now(timezone.utc)
         self.connection_quality = connection_quality
         db.session.commit()
 
     def record_leave(self, total_time: int, participation_score: float, feedback: str = None):
         """Record participant leaving the meeting"""
-        self.left_at = datetime.now(UTC)
+        self.left_at = datetime.now(timezone.utc)
         self.total_time = total_time
         self.participation_score = participation_score
         self.feedback = feedback

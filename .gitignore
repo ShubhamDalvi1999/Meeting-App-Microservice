@@ -17,6 +17,11 @@ dist/
 build/
 *.pyc
 __pycache__/
+*.pytest_cache
+*.coverage_html/
+auth_service.egg-info/
+flask_service.egg-info/
+
 
 # IDE and editor files
 .vscode/
@@ -35,3 +40,7 @@ data/
 
 # Documentation files
 docs/
+
+# pytest cache
+.pytest_cache/
+

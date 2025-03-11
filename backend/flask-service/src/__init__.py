@@ -7,7 +7,7 @@ import redis
 import logging
 
 # Import from shared modules
-from shared.database import db
+from meeting_shared.database import db
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

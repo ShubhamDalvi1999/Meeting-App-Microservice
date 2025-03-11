@@ -8,6 +8,7 @@ import os
 from datetime import datetime, timedelta
 from .base import IntegrationTestBase
 import responses
+import pytest
 
 class TestMeetingFlow(IntegrationTestBase):
     """Test the complete meeting flow."""
@@ -297,3 +298,87 @@ class TestMeetingFlow(IntegrationTestBase):
         self.assert_response_status(response, 200)
         data = json.loads(response.data.decode('utf-8'))
         self.assertEqual(len(data), 2)  # Should find both meetings with test3@example.com 
+
+def test_complete_meeting_flow(client, auth_header):
+    """Test complete meeting creation and management flow."""
+    # Create a meeting
+    meeting_data = {
+        'title': 'Integration Test Meeting',
+        'description': 'Testing full meeting workflow',
+        'start_time': (datetime.utcnow() + timedelta(days=1)).isoformat(),
+        'end_time': (datetime.utcnow() + timedelta(days=1, hours=1)).isoformat(),
+        'location': 'Conference Room A',
+        'meeting_type': 'team'
+    }
+    
+    response = client.post('/api/meetings', 
+                         json=meeting_data,
+                         headers=auth_header)
+    assert response.status_code == 201
+    meeting_id = response.json['id']
+    
+    # Add participants
+    participants = [
+        {'user_id': 2, 'role': 'attendee'},
+        {'user_id': 3, 'role': 'presenter'}
+    ]
+    response = client.post(f'/api/meetings/{meeting_id}/participants',
+                         json=participants,
+                         headers=auth_header)
+    assert response.status_code == 201
+    
+    # Add agenda items
+    agenda_items = [
+        {
+            'title': 'Introduction',
+            'description': 'Project overview',
+            'duration': 15,
+            'order': 1
+        },
+        {
+            'title': 'Technical Discussion',
+            'description': 'Architecture review',
+            'duration': 30,
+            'order': 2
+        }
+    ]
+    response = client.post(f'/api/meetings/{meeting_id}/agenda',
+                         json=agenda_items,
+                         headers=auth_header)
+    assert response.status_code == 201
+    
+    # Verify meeting details
+    response = client.get(f'/api/meetings/{meeting_id}',
+                        headers=auth_header)
+    assert response.status_code == 200
+    meeting = response.json
+    
+    assert meeting['title'] == meeting_data['title']
+    assert len(meeting['participants']) == 2
+    assert len(meeting['agenda_items']) == 2
+    
+    # Update meeting
+    update_data = {
+        'title': 'Updated Meeting Title',
+        'description': 'Updated description'
+    }
+    response = client.put(f'/api/meetings/{meeting_id}',
+                        json=update_data,
+                        headers=auth_header)
+    assert response.status_code == 200
+    
+    # Verify update
+    response = client.get(f'/api/meetings/{meeting_id}',
+                        headers=auth_header)
+    assert response.status_code == 200
+    assert response.json['title'] == update_data['title']
+    
+    # Delete meeting
+    response = client.delete(f'/api/meetings/{meeting_id}',
+                          headers=auth_header)
+    assert response.status_code == 204
+    
+    # Verify deletion
+    response = client.get(f'/api/meetings/{meeting_id}',
+                        headers=auth_header)
+    assert response.status_code == 404 

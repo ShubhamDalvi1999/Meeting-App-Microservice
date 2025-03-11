@@ -19,6 +19,9 @@ interface State {
  * Displays a fallback UI instead of crashing the whole app.
  */
 class ErrorBoundary extends Component<Props, State> {
+  readonly state: State = { hasError: false };
+  readonly props!: Props;
+
   constructor(props: Props) {
     super(props);
     this.state = { hasError: false };
@@ -60,7 +63,7 @@ class ErrorBoundary extends Component<Props, State> {
       }
       
       // Use provided fallback component
-      if (fallback) {
+      if (fallback && typeof fallback !== 'function') {
         return fallback;
       }
       
@@ -87,13 +90,13 @@ class ErrorBoundary extends Component<Props, State> {
       );
     }
 
-    // When there's no error, render children
+    // When there's no error, render children normally
     return children;
   }
 }
 
 /**
- * HOC to wrap a component with an error boundary
+ * Higher-order component that wraps a component with an ErrorBoundary
  */
 export function withErrorBoundary<P extends object>(
   Component: React.ComponentType<P>,

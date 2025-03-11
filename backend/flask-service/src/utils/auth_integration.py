@@ -1,8 +1,8 @@
 from typing import Optional, Dict, Any, Tuple
 from flask import current_app, request, g
-from shared.database import db, transaction_context
-from shared.middleware.auth import jwt_required
-from shared.schemas.base import ErrorResponse
+from meeting_shared.database import db, transaction_context
+from meeting_shared.middleware.auth import jwt_required
+from meeting_shared.schemas.base import ErrorResponse
 from ..models.user import User
 import jwt
 import logging

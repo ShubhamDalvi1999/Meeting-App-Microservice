@@ -79,15 +79,16 @@ def scrape_project(project_path, output_file, ignore_extensions=None, ignore_dir
                             '.ear', '.zip', '.tar', '.gz', '.rar', '.7z', '.db', 
                             '.sqlite', '.sqlite3', '.mdf', '.ldf', '.jpg', '.jpeg', 
                             '.png', '.gif', '.bmp', '.ico', '.mp3', '.mp4', '.avi', 
-                            '.mov', '.wmv', '.flv', '.pdf', '.ps1', '.sh', '.bat', '.cmd']
+                            '.mov', '.wmv', '.flv', '.pdf', '.coverage_html', '.coverage_xml',
+                            '.pytest_cache', '.xml']
     
     if ignore_dirs is None:
         ignore_dirs = ['.git', 'node_modules', '__pycache__', 'venv', 'env', 
                       '.venv', '.env', 'dist', 'build', 'target', 'bin', 'obj',
-                      '.idea', '.vscode', 'data', 'logs', 'temp', 'cache', 'backup', 'docs', 'test', 'tests', 'tests']
+                      '.idea', '.vscode', 'data', 'logs', 'temp', 'cache', 'backup', 'docs', 'test', 'tests', 'tests', '.coverage_html']
     
     if ignore_patterns is None:
-        ignore_patterns = []
+        ignore_patterns = ['*/.coverage_html/*', '*/login/backend/flask-service/.coverage_html/*']
     
     # Add patterns to ignore context and temp files
     ignore_patterns.extend(["*_context*.txt", "*_output*.txt", "*.context", "project_contents*.txt"])

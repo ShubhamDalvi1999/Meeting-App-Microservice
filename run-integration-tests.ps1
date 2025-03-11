@@ -19,7 +19,7 @@ function Write-ColorOutput {
 }
 
 # Function to run tests for a specific service
-function Run-ServiceTests {
+function Invoke-ServiceTests {
     param (
         [string]$ServiceName,
         [string]$Directory
@@ -93,7 +93,7 @@ $Services = @{
 if ($Service) {
     if ($Services.ContainsKey($Service)) {
         $Directory = $Services[$Service]
-        $Passed = Run-ServiceTests -ServiceName $Service -Directory $Directory
+        $Passed = Invoke-ServiceTests -ServiceName $Service -Directory $Directory
         $AllPassed = $AllPassed -and $Passed
     } else {
         Write-ColorOutput "Unknown service: $Service" "Red"
@@ -103,7 +103,7 @@ if ($Service) {
 } else {
     # Run tests for all services
     foreach ($ServiceItem in $Services.GetEnumerator()) {
-        $Passed = Run-ServiceTests -ServiceName $ServiceItem.Key -Directory $ServiceItem.Value
+        $Passed = Invoke-ServiceTests -ServiceName $ServiceItem.Key -Directory $ServiceItem.Value
         $AllPassed = $AllPassed -and $Passed
     }
 }

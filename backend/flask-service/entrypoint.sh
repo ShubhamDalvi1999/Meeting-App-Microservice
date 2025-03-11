@@ -11,14 +11,14 @@ echo "Postgres is up - executing command"
 # Print directory structure for debugging
 echo "Directory structure in /app:"
 ls -la /app
-echo "Directory structure in /app/shared:"
-ls -la /app/shared
+echo "Directory structure in /app/meeting_shared:"
+ls -la /app/meeting_shared
 echo "Directory structure in /app/src:"
 ls -la /app/src
 
 # Set Python path
-echo "Setting PYTHONPATH to: /app:/app/shared"
-export PYTHONPATH=/app:/app/shared
+echo "Setting PYTHONPATH to: /app:/app/meeting_shared"
+export PYTHONPATH=/app:/app/meeting_shared
 echo "Environment variables:"
 env | grep -E 'FLASK|DATABASE|REDIS|JWT|SERVICE|AUTH|POSTGRES|PYTHONPATH'
 
@@ -50,7 +50,7 @@ logger.info(f"Initial sys.path: {sys.path}")
 
 # Ensure necessary paths are in sys.path
 sys.path.insert(0, '/app')
-sys.path.insert(0, '/app/shared')
+sys.path.insert(0, '/app/meeting_shared')
 logger.info(f"Updated sys.path: {sys.path}")
 
 # Log environment variables

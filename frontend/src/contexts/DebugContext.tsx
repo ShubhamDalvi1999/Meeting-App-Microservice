@@ -53,7 +53,7 @@ const MAX_API_RESPONSES = 100;
  */
 export const DebugProvider: React.FC<{
   children: React.ReactNode;
-  initialEnabled?: boolean;
+  initialEnabled?: boolean | string;
 }> = ({ children, initialEnabled = env.NEXT_PUBLIC_ENABLE_DEBUG_TOOLS }) => {
   // Debug state
   const [isDebugEnabled, setIsDebugEnabled] = useState<boolean>(

@@ -13,6 +13,108 @@ The application is built using a microservices architecture consisting of:
 - **Databases**: PostgreSQL for persistent data storage
 - **Redis**: For caching, pub/sub messaging, and session storage
 - **Monitoring**: Prometheus and Grafana for metrics and monitoring
+- **Shared Package**: Common utilities and middleware shared across services
+
+### Shared Package
+
+The `meeting_shared` package contains common functionality used across all microservices in the Meeting App. This ensures consistency and reduces code duplication.
+
+#### Installation
+
+For development, install the package in editable mode:
+
+```bash
+# From the project root
+pip install -e meeting_shared
+```
+
+Or add to your service's requirements.txt:
+```
+-e ../meeting_shared
+```
+
+#### Components
+
+- **shared_logging**: Structured JSON logging with request ID tracking
+  ```python
+  from meeting_shared.shared_logging import setup_logging
+  
+  # Initialize logging
+  logger = setup_logging(app, service_name="my-service")
+  ```
+
+- **middleware**: Flask middleware components
+  ```python
+  from meeting_shared.middleware import register_middleware
+  from meeting_shared.middleware.auth import jwt_required
+  
+  # Register all middleware
+  register_middleware(app)
+  
+  # Use auth decorator
+  @app.route("/protected")
+  @jwt_required
+  def protected_route():
+      return {"message": "Protected resource"}
+  ```
+
+- **discovery**: Service discovery utilities
+  ```python
+  from meeting_shared.discovery import get_service_url
+  
+  # Get URL for a service
+  auth_url = get_service_url("auth-service")
+  ```
+
+- **secrets**: Secret management
+  ```python
+  from meeting_shared.secrets import get_secret
+  
+  # Get a secret
+  api_key = get_secret("api.key")
+  ```
+
+#### Development Guidelines
+
+1. **Adding New Features**
+   - Place shared code in the appropriate module
+   - Update tests in the `tests/` directory
+   - Document new functionality in docstrings
+
+2. **Dependencies**
+   - Add new dependencies to `setup.py`
+   - Keep dependencies minimal and version-pinned
+
+3. **Testing**
+   ```bash
+   # Run tests
+   cd meeting_shared
+   pytest
+   ```
+
+4. **Code Style**
+   - Follow PEP 8
+   - Use type hints
+   - Document public interfaces
+
+5. **Version Control**
+   - Create feature branches from `main`
+   - Write descriptive commit messages
+   - Update CHANGELOG.md for significant changes
+
+#### Docker Integration
+
+The shared package is automatically mounted in development:
+```yaml
+volumes:
+  - ./meeting_shared:/app/meeting_shared
+```
+
+For production, it's installed during the build process:
+```dockerfile
+COPY meeting_shared /app/meeting_shared/
+RUN pip install -e /app/meeting_shared
+```
 
 ### Advanced Features
 

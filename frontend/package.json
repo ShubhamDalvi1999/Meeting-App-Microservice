@@ -47,6 +47,6 @@
     "eslint-plugin-react": "^7.33.2",
     "eslint-plugin-react-hooks": "^4.6.0",
     "prettier": "^3.0.2",
-    "why-did-you-render": "^7.0.1"
+    "@welldone-software/why-did-you-render": "^7.0.1"
   }
 } 

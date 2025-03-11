@@ -11,8 +11,8 @@ from pathlib import Path
 
 # Try to import shared modules
 try:
-    from backend.shared.logging import configure_logging, get_logger
-    from backend.shared.middleware.request_id import RequestIdMiddleware, get_request_id
+    from meeting_shared.shared_logging import configure_logging, get_logger
+    from meeting_shared.middleware.request_id import RequestIdMiddleware, get_request_id
     SHARED_MODULES_AVAILABLE = True
 except ImportError:
     SHARED_MODULES_AVAILABLE = False
