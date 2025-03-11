@@ -5,6 +5,14 @@ Base schemas for API responses.
 from typing import Optional, Dict, Any
 from pydantic import BaseModel
 
+class BaseSchema(BaseModel):
+    """Base schema that all other schemas should inherit from."""
+    class Config:
+        orm_mode = True
+        validate_assignment = True
+        arbitrary_types_allowed = True
+        extra = "forbid"
+
 class ErrorResponse(BaseModel):
     """Standard error response model."""
     error: str

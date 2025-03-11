@@ -1,8 +1,10 @@
 import React from 'react';
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { DebugProvider } from '@/contexts/DebugContext';
+import { AuthProvider } from '@/contexts/AuthContext';
 import logger from '@/utils/logger';
 import { env, isDevelopment } from '@/config/environment';
 import '@/styles/globals.css';
@@ -58,7 +60,11 @@ function MyApp({ Component, pageProps }: AppProps) {
       
       <DebugProvider>
         <ErrorBoundary onError={handleError}>
-          <Component {...pageProps} />
+          <GoogleOAuthProvider clientId={process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ''}>
+            <AuthProvider>
+              <Component {...pageProps} />
+            </AuthProvider>
+          </GoogleOAuthProvider>
         </ErrorBoundary>
       </DebugProvider>
     </>

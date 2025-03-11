@@ -22,9 +22,17 @@ const nextConfig = {
   
   // Disable static generation and export
   output: 'standalone',
+  
+  // Configure to avoid static generation issues
   experimental: {
-    // Disable static generation
-    disableStaticGeneration: true,
+    // Turn off static optimization for pages that use getServerSideProps
+    serverComponents: false
+  },
+  
+  // Server options to ensure binding to all network interfaces
+  serverRuntimeConfig: {
+    // Will only be available on the server side
+    hostname: '0.0.0.0',
   },
   
   // Default environment variables

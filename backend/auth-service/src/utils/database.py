@@ -5,6 +5,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from contextlib import contextmanager
 import logging
 
+# Define TypeVar T for return type annotations
+T = TypeVar('T')
+
 # Import from shared modules if available, otherwise use local implementation
 from meeting_shared.database import db, transaction
 

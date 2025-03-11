@@ -46,6 +46,7 @@ ENV PORT=3000
 ENV NEXT_PUBLIC_API_URL=http://localhost:5000
 ENV NEXT_PUBLIC_AUTH_URL=http://localhost:5001
 ENV NEXT_PUBLIC_WS_URL=ws://localhost:3001
+ENV HOST=0.0.0.0
 
 # Create public directory if it doesn't exist
 RUN mkdir -p public
@@ -56,6 +57,8 @@ COPY --from=builder /app/public/ ./public/
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
+# Copy the standalone output for the server
+COPY --from=builder /app/.next/standalone ./
 
 # Expose port
 EXPOSE 3000
@@ -64,5 +67,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3000/api/health || exit 1
 
-# Start the application - updated to use standalone server
-CMD ["node", ".next/standalone/server.js"] 
+# Start the application with explicit host binding
+CMD ["node", "server.js"] 
